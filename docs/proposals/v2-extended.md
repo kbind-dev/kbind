@@ -122,7 +122,12 @@ distribution, which wires its own implementation against the same interface.
   Kubernetes (workspaces, in the contrib/kcp issuer).
 * Mint credentials: ServiceAccount + RBAC scoped to exactly the exported APIs (+
   declared related resources) within that boundary + kubeconfig. This fixes v1's
-  cluster-admin-ish `kube-binder` ClusterRole (roadmap #303: reduced footprint).
+  cluster-admin-ish `kube-binder` ClusterRole (roadmap #303: reduced footprint). On a
+  plain-Kubernetes provider "scoped to the exported APIs" is an explicit Role enumerating
+  those resources; on the kcp/CRD-less flavor the tenancy boundary *is* the workspace, so
+  scoping is the workspace grant itself (everything in it is exported by construction)
+  rather than a per-resource enumeration — same `Issuer` interface, two scoping mechanisms
+  matching the core's two schema sources.
 * **Credential mechanism: long-lived SA token** (v1 behavior, secret-based
   ServiceAccount token). Trade-off accepted deliberately: zero rotation friction and no
   konnector-side refresh machinery, at the cost of security posture — and noting
@@ -130,8 +135,9 @@ distribution, which wires its own implementation against the same interface.
   revisitable without API change (the bundle's Secret is replaceable; a bounded-token +
   reissue mode can be added later behind the same interface). Revocation = delete the
   `Grant` → issuer deletes the SA/token.
-* Records issuance in **`Grant`** (`catalog.kube-bind.io`): "identity X was issued
-  credentials Y for export Z". The anchor for revocation, audit, and the reaper.
+* Records issuance in **`Grant`** (`iam.kube-bind.io` — an issuance/identity record, not
+  catalog presentation): "identity X was issued credentials Y for export Z". The anchor
+  for revocation, audit, and the reaper.
 
 ### 3. Gateway (HTTP API)
 
@@ -159,6 +165,14 @@ envelope (`{ bundle: [...] }`). There is no other handshake state: no request ob
 poll, no phases to wait on. `curl` bind + pickup piped to `kubectl apply -f -` is a
 complete client.
 
+The single-use, short-TTL property applies to the **pickup URL**, not to the credential
+inside it: the bundle's Secret carries the long-lived SA token minted by the issuer
+(§2), so a bundle that has been picked up once stays valid and re-appliable. That is what
+makes `-o yaml > binding.yaml` committed to git a real GitOps artifact — the pickup is
+consumed once, the token it delivered keeps working until its `Grant` is revoked.
+Re-running `bind` mints a fresh `Grant`/token and a new pickup; it does not invalidate a
+previously committed bundle unless that `Grant` is explicitly revoked.
+
 ### 4. Auth (pluggable)
 
 * `Authenticator` interface: `Routes()` (mounted under `/api/auth/…`) +
@@ -175,7 +189,10 @@ complete client.
 ### 5. Reaper (provider-side, optional)
 
 The core leaves dead-consumer GC explicitly to this layer, keyed off the per-Connection
-`Lease` the konnector maintains:
+`Lease` the konnector maintains. **This component is blocked on that core primitive:** the
+konnector's provider-side `Lease` is specified in the core proposal but is new (no v1
+equivalent), so the reaper ships only once the konnector actually maintains the Lease;
+until then dead-consumer GC is manual.
 
 * Lease expired beyond TTL → mark the issuance stale → (configurably) revoke
   credentials, then delete kube-bind-created namespaces and synced objects.
@@ -238,15 +255,16 @@ remains separate, providing its own issuer implementation behind the same interf
 
 * **Packaging**: one `kube-bind-backend` binary; gateway/issuer/reaper/apply are module
   flags, boundaries kept as Go packages.
-* **Issuance anchor**: `Grant` in `catalog.kube-bind.io` — the typed record of
+* **Issuance anchor**: `Grant` in `iam.kube-bind.io` — the typed record of
   "identity X was issued credentials Y for export Z"; anchor for revocation, audit,
-  reaper.
+  reaper. Kept out of `catalog.kube-bind.io` so that group stays purely presentation+defaults.
 * **Credentials**: long-lived secret-based SA token (v1 behavior) — zero rotation
   friction accepted over security posture; revocation via `Grant` deletion; bounded
   tokens addable later behind the same issuer interface without API change.
 * **Catalog vocabulary**: `Export` + `Collection`.
-* **Bundle delivery**: one-time pickup URL, 5-minute TTL, single use; bundle never
-  stored at rest in the gateway.
+* **Bundle delivery**: one-time pickup URL, 5-minute TTL, single use — the TTL/single-use
+  applies to the *pickup URL*, not the long-lived SA token inside, so a picked-up bundle
+  stays re-appliable (GitOps-safe). The bundle is never stored at rest in the gateway.
 * **kcp**: stays a separate distribution (`contrib/kcp`) providing its own issuer
   implementation; the in-tree backend issuer is plain Kubernetes only.
 * **UI reach**: browser-apply path **kept** (roadmap #406) — gateway `/api/apply`
