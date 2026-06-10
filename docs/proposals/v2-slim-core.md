@@ -206,11 +206,12 @@ spec:
           matchLabels:
             mangodb.io/managed: "true"
 status:
-  conditions: []                  # Connected, Synced, Conflicts
+  conditions: []                  # Connected, Synced, Conflicts, PermissionDenied
   boundAPIs:                      # per-API observed state
     - name: mangodbs.mangodb.io
       crdHash: sha256:…           # applied schema version
-      conflicts: []               # objects skipped due to foreign ownership
+      conflictCount: 0            # objects skipped due to foreign ownership;
+                                  # per-object detail lives on each object's own condition
 ```
 
 ```yaml
@@ -284,8 +285,17 @@ order-independent and level-triggered**. A binding referencing a not-yet-existin
 `Connection`, a `Connection` referencing a not-yet-existing Secret, a binding listing a
 not-yet-exported CRD — none of these are errors, all are `Pending` conditions that
 resolve when the missing piece arrives. No phase gating, no request/response objects, no
-controller that must answer before the user may apply the next thing. (Equivalently:
-`kubectl delete -f mangodb-binding.yaml` is the complete, ordered-don't-care unbind.)
+controller that must answer before the user may apply the next thing.
+
+Unbind has one ordering constraint that apply does not. `kubectl delete -f
+mangodb-binding.yaml` deletes the `Connection`, bindings, and synced objects in whatever
+order the server processes them, but every synced consumer object carries a finalizer
+whose release requires the konnector to reach the provider through the *very* `Connection`
+being deleted. The konnector therefore drains object finalizers before a referenced
+`Connection`/binding is allowed to finalize: one that still has synced objects bound to it
+stays in `Terminating` with a `DrainingObjects` condition until those objects' provider
+copies are gone, then releases. "Delete the whole file" converges — it does not deadlock —
+but the `Connection` is the *last* object to disappear, not the first.
 
 ### Schema sources: CRD and OpenAPI
 
@@ -293,9 +303,14 @@ The konnector must install a working CRD on the consumer for every bound API. Tw
 to obtain it, selected by `Connection.spec.schema.source` (`Auto` probes CRD first,
 falls back to OpenAPI):
 
-* **`CRD`** — read the CRD from the provider's apiextensions API and apply it (minus
-  webhook conversion, status). Highest fidelity; requires the provider to *have* CRDs
-  and the credentials to read them.
+* **`CRD`** — read the CRD from the provider's apiextensions API and apply it on the
+  consumer with mechanical adjustments: never copy provider-side `conversion.strategy:
+  Webhook` or its caBundle (such CRDs are refused — per-API condition + skip, see the
+  sync table), add an owner-ref to the `Connection`, and inject UX-only printer
+  columns/categories. To keep a multi-version CRD installable on the consumer *without* a
+  conversion webhook, install only the provider's **storage/served version** rather than
+  every historical version. Highest fidelity; requires the provider to *have* CRDs and
+  the credentials to read them.
 * **`OpenAPI`** — for CRD-less providers (kcp and kcp-like systems, aggregated APIs):
   synthesize a CRD from what every Kubernetes-shaped API server already serves:
   * **discovery** (`/apis/<group>/<version>`) → plural/singular/kind/shortNames,
@@ -324,27 +339,39 @@ name on the provider. `status.exportedAPIs` is computed per source: labeled CRDs
 | Spec | consumer → provider, server-side apply with a dedicated field manager. |
 | Status | provider → consumer, status subresource update. |
 | Namespaces | If the consumer namespace doesn't exist on the provider, the konnector creates it (annotated as kube-bind-created; only kube-bind-created namespaces are cleaned up on unbind). |
-| Deletion | Finalizer on consumer object (as today); consumer deletion propagates to provider, finalizer released when provider copy is gone. Provider-side deletion of a synced object is treated as drift and re-created (consumer is source of truth for spec). |
+| Deletion | Finalizer on consumer object (as today); consumer deletion propagates to provider, finalizer released only when the provider copy is fully gone (a provider-side finalizer holds the consumer object in `Terminating` until it clears). `kube-bind.io/deletion-policy: Orphan` on a consumer object releases the finalizer without deleting the provider copy. Provider-side deletion of a synced object is treated as drift and re-created **unless** the provider copy has a non-zero deletionTimestamp — then the konnector waits for it to finalize rather than racing a re-create. Consumer is source of truth for spec. |
 | Schema | Per `Connection.spec.schema`: konnector obtains schemas via `source: CRD` (read apiextensions) or `OpenAPI` (synthesize from discovery + `/openapi/v3` — CRD-less providers like kcp), pulls per `pullPolicy: All` or `Bound`, applies on the consumer (owner-ref to the `Connection`). `updatePolicy: Always` keeps following provider schema changes; `Once` pins. CRDs with `strategy: Webhook` are refused (per-API condition + skip). |
 | Discovery | `Connection.status.exportedAPIs`: labeled CRDs (`source: CRD`) or discovery minus built-ins (`source: OpenAPI`, where the logical-cluster boundary is the export boundary) — core-level discovery with zero provider CRDs. |
-| Related resources | Selected Secrets/ConfigMaps sync in the declared direction, same identity rules, scoped like their binding. |
+| Related resources | Selected Secrets/ConfigMaps sync in the declared direction, same identity rules, scoped like their binding. They are owned by the **binding** (not by individual instances): an object is synced while it matches the selector and is garbage-collected when it stops matching or the binding is removed. The same ownership markers and `conflictPolicy` apply — a related object already owned by another binding/consumer is a conflict, never silently overwritten. |
+| RBAC | The supplied credentials' RBAC *is* the authorization model; partial RBAC is an expected steady state, not a failure. Each forbidden operation surfaces as a typed `PermissionDenied` condition naming the verb+resource refused (per-API on the binding, per-object on the instance); the konnector keeps syncing everything it *is* allowed to and never fails a whole binding because one resource or namespace is out of reach. |
 | Informers | One shared dynamic informer per GVR per connection. Cluster-wide informers for `ClusterBinding`; namespace-scoped informers where only namespaced `Binding`s exist. |
 
 ### Conflict handling (the new hard part)
 
 Identity mapping means two writers can legitimately collide. Core rules:
 
-1. Every object the konnector writes carries ownership markers (annotation pair:
-   binding UID + source cluster UID — same idea as today's
-   `kube-bind.io/consumer-uid` / `provider-uid` annotations, kept).
-2. Before first write to a target object that already exists **without** our markers:
-   * `conflictPolicy: Fail` (default) — do not touch it. Record it in
-     `status.boundResources[].conflicts`, set `Conflicts` condition, emit an Event,
-     keep syncing everything else.
-   * `conflictPolicy: Adopt` — take ownership (stamp markers, SSA force-apply).
-3. Two `Binding`s (or two consumers against one provider target) claiming the same
-   object: second writer sees foreign markers → always a conflict regardless of policy.
-   First-writer-wins, deterministically.
+1. Every object the konnector writes carries ownership markers: the **binding UID** plus
+   the **source cluster UID**. The source cluster UID is the identity the `Connection`
+   pins in its status the first time it resolves its credentials — *not* something read
+   from a fixed object like the `kube-system` namespace, which does not exist on
+   CRD-less/logical-cluster providers (kcp). This keeps the marker well-defined under both
+   schema sources. (Same idea as today's `kube-bind.io/consumer-uid` / `provider-uid`
+   annotations, kept.)
+2. Before first write, the konnector classifies the existing target object three ways:
+   * **No markers** (a foreign, un-owned object): `conflictPolicy: Fail` (default) does
+     not touch it; `conflictPolicy: Adopt` stamps markers and SSA force-applies.
+   * **Our markers, our current binding + object UID**: ours — normal SSA update.
+   * **Our cluster's markers but a stale/foreign binding-or-object UID**, *or* **another
+     cluster's markers**: always a conflict, regardless of `conflictPolicy`. `Adopt`
+     never steals an object another binding/consumer owns; first-writer-wins,
+     deterministically.
+3. Conflicts are recorded **on the conflicting object itself** as a typed condition that
+   distinguishes the two cases an operator remediates differently — `ForeignObjectExists`
+   (no markers; rename or switch to `Adopt`) vs. `OwnedByAnother` (claimed by a different
+   binding/consumer; pick another name). The binding does **not** inline an unbounded list
+   of object names: its status carries only a `Conflicts` condition and a count
+   (`boundAPIs[].conflictCount`), plus an Event. The konnector keeps syncing everything
+   else.
 4. Field-level conflicts within an owned object are resolved by SSA with
    `force=true` for our field manager on our sync direction only (spec fields upstream,
    status fields downstream) — same as today, but now stated as the contract.
@@ -369,7 +396,11 @@ moved into the konnector or out of core:
   logical clusters (kcp workspaces, a cluster fleet) — see
   [Engine](#engine-built-on-multicluster-runtime).
 * It watches `Connection`, `ClusterBinding`, and `Binding` objects, and only the Secrets
-  that `Connection`s reference (fixes the v1 watch-all-secrets issue).
+  that `Connection`s reference (fixes the v1 watch-all-secrets issue). A `Connection`'s
+  `kubeconfigSecretRef` must resolve to the konnector's own designated namespace (default
+  `kube-bind`): `Connection` is cluster-scoped, so letting it name a Secret in any
+  namespace would let anyone who can create a `Connection` read any Secret the konnector's
+  ServiceAccount can. Cross-namespace refs are rejected with `SecretValid=False`.
 * One `Connection` = one provider client/informer context; all bindings referencing it
   share that context.
 * The provider cluster needs: reachable API server + RBAC for the supplied credentials.
@@ -555,9 +586,20 @@ Rules:
   `syncMode` field name is reserved per-API but not implemented in alpha.
 * **Related resources**: `secrets` + `configmaps` only; `labelSelector` + named
   selectors only. JSONPath reference-following selectors do not enter core.
-* **Conflicts**: `conflictPolicy: Fail | Adopt`; `Adopt` never touches objects carrying
-  another binding's/consumer's markers — cross-binding collisions are always conflicts,
-  first-writer-wins.
+* **Conflicts**: `conflictPolicy: Fail | Adopt` with three-way classification (no markers
+  / ours / foreign-or-stale). `Adopt` only takes *un-owned* objects and never steals one
+  carrying another binding's/consumer's markers — cross-binding collisions are always
+  conflicts, first-writer-wins. Per-object detail lives on the conflicting object's own
+  condition (`ForeignObjectExists` vs `OwnedByAnother`); the binding holds only a
+  `Conflicts` condition + count. The marker's source cluster UID is the
+  `Connection`-pinned identity, so conflicts stay well-defined on CRD-less providers too.
+* **Cluster identity**: each `Connection` pins the resolved provider (and local) cluster
+  UID in its status on first connect and is immutable thereafter; a Secret later pointing
+  at a *different* cluster is rejected (`Connected=False`) rather than silently re-homing
+  synced objects.
+* **Deletion**: consumer deletion propagates to the provider and the binding/`Connection`
+  drains object finalizers before finalizing (`DrainingObjects`); `deletion-policy:
+  Orphan` opts an object out of provider-side deletion.
 * **Provider namespaces**: konnector creates missing namespaces iff RBAC allows
   (annotated kube-bind-created, cleaned up on unbind); otherwise condition + wait.
 * **Heartbeat**: a plain `coordination.k8s.io/Lease` per Connection, maintained by the
