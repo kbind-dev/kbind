@@ -365,13 +365,17 @@ Identity mapping means two writers can legitimately collide. Core rules:
      cluster's markers**: always a conflict, regardless of `conflictPolicy`. `Adopt`
      never steals an object another binding/consumer owns; first-writer-wins,
      deterministically.
-3. Conflicts are recorded **on the conflicting object itself** as a typed condition that
-   distinguishes the two cases an operator remediates differently — `ForeignObjectExists`
-   (no markers; rename or switch to `Adopt`) vs. `OwnedByAnother` (claimed by a different
-   binding/consumer; pick another name). The binding does **not** inline an unbounded list
-   of object names: its status carries only a `Conflicts` condition and a count
-   (`boundAPIs[].conflictCount`), plus an Event. The konnector keeps syncing everything
-   else.
+3. Conflicts are surfaced by **two authoritative signals**: a Kubernetes **Event** on the
+   consumer object, and a **count + `Conflicts` condition on the binding**
+   (`boundAPIs[].conflictCount`) — never an unbounded list of object names. Both carry the
+   reason that tells an operator how to remediate: `ForeignObjectExists` (no markers;
+   rename or switch to `Adopt`) vs. `OwnedByAnother` (claimed by a different
+   binding/consumer; pick another name). The konnector *also* writes that reason as a
+   condition on the conflicting object itself, but only **best-effort**: a structural CRD
+   whose `status` schema has no `conditions` field will have it pruned by the API server
+   (confirmed in the POC against a status-only CRD). So the Event and the binding count are
+   the contract; the per-object condition is a convenience present only when the synced
+   type defines `status.conditions`. The konnector keeps syncing everything else.
 4. Field-level conflicts within an owned object are resolved by SSA with
    `force=true` for our field manager on our sync direction only (spec fields upstream,
    status fields downstream) — same as today, but now stated as the contract.
@@ -589,9 +593,11 @@ Rules:
 * **Conflicts**: `conflictPolicy: Fail | Adopt` with three-way classification (no markers
   / ours / foreign-or-stale). `Adopt` only takes *un-owned* objects and never steals one
   carrying another binding's/consumer's markers — cross-binding collisions are always
-  conflicts, first-writer-wins. Per-object detail lives on the conflicting object's own
-  condition (`ForeignObjectExists` vs `OwnedByAnother`); the binding holds only a
-  `Conflicts` condition + count. The marker's source cluster UID is the
+  conflicts, first-writer-wins. Conflicts are surfaced authoritatively by a Kubernetes
+  **Event** on the consumer object plus a **`Conflicts` condition + `conflictCount`** on
+  the binding (reasons `ForeignObjectExists` vs `OwnedByAnother`); a per-object condition
+  is written best-effort only (the API server prunes it on CRDs whose `status` schema has
+  no `conditions` field — confirmed in the POC). The marker's source cluster UID is the
   `Connection`-pinned identity, so conflicts stay well-defined on CRD-less providers too.
 * **Cluster identity**: each `Connection` pins the resolved provider (and local) cluster
   UID in its status on first connect and is immutable thereafter; a Secret later pointing

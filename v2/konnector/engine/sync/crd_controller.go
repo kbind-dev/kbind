@@ -1,0 +1,317 @@
+/*
+Copyright 2026 The Kube Bind Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+// Package sync implements the dynamic per-GVR instance sync. A CRD controller
+// watches the CRDs installed by bindings and starts/stops a spec/status syncer
+// for each.
+package sync
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/runtime"
+	dynamicclient "k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/client-go/dynamic/dynamiclister"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+)
+
+const cleanupTimeout = 10 * time.Second
+
+// CRDController watches managed CRDs and runs a per-GVR syncer for each.
+type CRDController struct {
+	mgr            ctrl.Manager
+	consumerConfig *rest.Config
+	consumerClient client.Client
+	providers      *providerCache
+	recorder       record.EventRecorder
+	resync         time.Duration
+
+	lock     sync.Mutex
+	contexts map[string]*syncContext // by CRD name
+}
+
+type syncContext struct {
+	generation int64
+	cancel     context.CancelFunc
+	wg         *sync.WaitGroup
+}
+
+// SetupWithManager registers the CRD controller. It uses a direct (uncached)
+// client for consumer object reads/writes inside the syncers, built from the
+// manager's rest config.
+func SetupWithManager(mgr ctrl.Manager) error {
+	consumerClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
+	if err != nil {
+		return fmt.Errorf("building direct consumer client: %w", err)
+	}
+	r := &CRDController{
+		mgr:            mgr,
+		consumerConfig: mgr.GetConfig(),
+		consumerClient: consumerClient,
+		providers:      newProviderCache(consumerClient, mgr.GetScheme()),
+		recorder:       mgr.GetEventRecorderFor("kube-bind-konnector"),
+		resync:         time.Minute,
+		contexts:       map[string]*syncContext{},
+	}
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&apiextensionsv1.CustomResourceDefinition{}).
+		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
+			return o.GetLabels()[corev1alpha1.LabelManaged] == "true"
+		})).
+		Named("managed-crds").
+		Complete(r)
+}
+
+// Reconcile starts or stops the syncer for a managed CRD.
+func (r *CRDController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	if err := r.consumerClient.Get(ctx, req.NamespacedName, crd); err != nil {
+		if apierrors.IsNotFound(err) {
+			crd = nil
+		} else {
+			return reconcile.Result{}, err
+		}
+	}
+	if err := r.reconcile(ctx, req.Name, crd); err != nil {
+		return reconcile.Result{}, err
+	}
+	return reconcile.Result{}, nil
+}
+
+func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiextensionsv1.CustomResourceDefinition) error {
+	log := ctrl.LoggerFrom(ctx).WithValues("crd", name)
+	deleted := crd == nil || crd.DeletionTimestamp != nil
+	var generation int64
+	if crd != nil {
+		generation = crd.Generation
+	}
+
+	r.lock.Lock()
+	c, found := r.contexts[name]
+	if found || deleted {
+		if !deleted && c.generation >= generation {
+			r.lock.Unlock()
+			return nil
+		}
+		if found {
+			log.Info("stopping syncer")
+			c.cancel()
+			waitWithTimeout(c.wg, cleanupTimeout)
+			delete(r.contexts, name)
+		}
+	}
+	r.lock.Unlock()
+	if deleted {
+		return nil
+	}
+
+	version := storageOrServedVersion(crd)
+	if version == "" {
+		return fmt.Errorf("CRD %s has no served version", name)
+	}
+	gvr := schema.GroupVersionResource{Group: crd.Spec.Group, Version: version, Resource: crd.Spec.Names.Plural}
+	gvk := schema.GroupVersionKind{Group: crd.Spec.Group, Version: version, Kind: crd.Spec.Names.Kind}
+
+	dyn, err := dynamicclient.NewForConfig(r.consumerConfig)
+	if err != nil {
+		return err
+	}
+	inf := dynamicinformer.NewFilteredDynamicInformer(dyn, gvr, metav1.NamespaceAll, r.resync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, nil)
+	lister := dynamiclister.New(inf.Informer().GetIndexer(), gvr)
+
+	rec := &specReconciler{
+		gvr:            gvr,
+		gvk:            gvk,
+		scope:          crd.Spec.Scope,
+		consumerLister: lister,
+		consumerClient: r.consumerClient,
+		providers:      r.providers,
+		recorder:       r.recorder,
+	}
+
+	syncLog := ctrl.Log.WithName("sync").WithValues("gvr", gvr.String())
+	ctrlr, err := controller.NewTypedUnmanaged(fmt.Sprintf("sync-%s", gvr.GroupResource().String()), controller.TypedOptions[reconcile.Request]{
+		Reconciler:     rec,
+		LogConstructor: func(*reconcile.Request) logr.Logger { return syncLog },
+	})
+	if err != nil {
+		return fmt.Errorf("creating sync controller: %w", err)
+	}
+
+	src := newInformerSource(inf)
+	if err := ctrlr.Watch(src); err != nil {
+		return fmt.Errorf("watching consumer informer: %w", err)
+	}
+	if err := ctrlr.Watch(r.bindingSource(gvr.GroupResource(), lister)); err != nil {
+		return fmt.Errorf("watching cluster bindings: %w", err)
+	}
+	if err := ctrlr.Watch(r.namespacedBindingSource(gvr.GroupResource(), lister)); err != nil {
+		return fmt.Errorf("watching bindings: %w", err)
+	}
+
+	syncCtx, cancel := context.WithCancel(ctx)
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+	go func() { defer wg.Done(); inf.Informer().Run(syncCtx.Done()) }()
+	go func() {
+		defer wg.Done()
+		if err := ctrlr.Start(syncCtx); err != nil {
+			runtime.HandleErrorWithContext(syncCtx, err, "sync controller stopped")
+		}
+	}()
+	if !cache.WaitForCacheSync(syncCtx.Done(), inf.Informer().HasSynced) {
+		cancel()
+		return fmt.Errorf("consumer informer for %s failed to sync", gvr)
+	}
+
+	r.lock.Lock()
+	r.contexts[name] = &syncContext{generation: generation, cancel: cancel, wg: wg}
+	r.lock.Unlock()
+	log.Info("started syncer", "gvr", gvr.String())
+	return nil
+}
+
+func (r *CRDController) bindingSource(gr schema.GroupResource, lister dynamiclister.Lister) source.TypedSource[reconcile.Request] {
+	return source.Kind(r.mgr.GetCache(), &corev1alpha1.ClusterBinding{}, handler.TypedEnqueueRequestsFromMapFunc(
+		func(_ context.Context, cb *corev1alpha1.ClusterBinding) []reconcile.Request {
+			if !listsAPI(cb.Spec.APIs, gr.String()) {
+				return nil
+			}
+			return requestsForAll(lister, "")
+		}))
+}
+
+func (r *CRDController) namespacedBindingSource(gr schema.GroupResource, lister dynamiclister.Lister) source.TypedSource[reconcile.Request] {
+	return source.Kind(r.mgr.GetCache(), &corev1alpha1.Binding{}, handler.TypedEnqueueRequestsFromMapFunc(
+		func(_ context.Context, b *corev1alpha1.Binding) []reconcile.Request {
+			if !listsAPI(b.Spec.APIs, gr.String()) {
+				return nil
+			}
+			return requestsForAll(lister, b.GetNamespace())
+		}))
+}
+
+func requestsForAll(lister dynamiclister.Lister, namespace string) []reconcile.Request {
+	var list []any
+	if namespace != "" {
+		l, err := lister.Namespace(namespace).List(labels.Everything())
+		if err != nil {
+			return nil
+		}
+		for _, o := range l {
+			list = append(list, o)
+		}
+	} else {
+		l, err := lister.List(labels.Everything())
+		if err != nil {
+			return nil
+		}
+		for _, o := range l {
+			list = append(list, o)
+		}
+	}
+	out := make([]reconcile.Request, 0, len(list))
+	for _, o := range list {
+		acc, ok := o.(interface {
+			GetName() string
+			GetNamespace() string
+		})
+		if !ok {
+			continue
+		}
+		out = append(out, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: acc.GetNamespace(), Name: acc.GetName()}})
+	}
+	return out
+}
+
+func storageOrServedVersion(crd *apiextensionsv1.CustomResourceDefinition) string {
+	var served string
+	for _, v := range crd.Spec.Versions {
+		if v.Storage {
+			return v.Name
+		}
+		if served == "" && v.Served {
+			served = v.Name
+		}
+	}
+	return served
+}
+
+func waitWithTimeout(wg *sync.WaitGroup, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
+// newInformerSource adapts a dynamic informer to a controller-runtime source.
+func newInformerSource(gi interface {
+	Informer() cache.SharedIndexInformer
+}) source.TypedSource[reconcile.Request] {
+	return &informerSourceImpl{informer: gi.Informer()}
+}
+
+type informerSourceImpl struct {
+	informer cache.SharedIndexInformer
+}
+
+func (s *informerSourceImpl) Start(ctx context.Context, q workqueue.TypedRateLimitingInterface[reconcile.Request]) error {
+	_, err := s.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(o any) { enqueue(o, q) },
+		UpdateFunc: func(_, o any) { enqueue(o, q) },
+		DeleteFunc: func(o any) { enqueue(o, q) },
+	})
+	return err
+}
+
+func enqueue(o any, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(o)
+	if err != nil {
+		return
+	}
+	ns, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return
+	}
+	q.Add(reconcile.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}})
+}
+
+var _ source.TypedSource[reconcile.Request] = &informerSourceImpl{}

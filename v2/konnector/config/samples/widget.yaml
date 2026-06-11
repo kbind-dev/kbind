@@ -1,0 +1,10 @@
+# A consumer-side instance. Apply on the CONSUMER cluster after the binding is
+# Ready (the Widget CRD will have been pulled from the provider). The konnector
+# syncs this object's spec up to the provider; provider status flows back here.
+apiVersion: example.org/v1
+kind: Widget
+metadata:
+  name: my-widget
+  namespace: default
+spec:
+  size: large
