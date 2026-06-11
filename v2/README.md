@@ -34,12 +34,15 @@ v2/
   consumer, and report `Ready` + `boundAPIs`.
 - A dynamic per-GVR syncer copies instance **spec up** (server-side apply with
   ownership markers + a finalizer) and **status down**, with `conflictPolicy:
-  Fail` surfaced on the object's own condition.
+  Fail` surfaced as an Event (+ best-effort object condition).
+- The provider side is the **multicluster-runtime engaged cluster** for each
+  Connection: writes go through its client, fresh reads through its API reader,
+  and status/drift events arrive via a **watch on its cache** (event-driven, not
+  polled — a low-frequency resync is only a backstop).
 
-Known POC simplifications (tracked against the proposal): status sync polls
-(no provider watch yet); the sync path uses direct provider clients rather than
-the mcr-engaged cluster cache; `schema.source: OpenAPI`, `Adopt`, related
-resources, autoBind and the provider `Lease` are not implemented yet.
+Known POC simplifications (tracked against the proposal): `schema.source:
+OpenAPI`, `conflictPolicy: Adopt`, related resources, `autoBind` and the
+provider `Lease` are not implemented yet.
 
 ## Build
 

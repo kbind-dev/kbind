@@ -177,11 +177,9 @@ func crdForConsumer(in *apiextensionsv1.CustomResourceDefinition, connName strin
 	if out.Annotations == nil {
 		out.Annotations = map[string]string{}
 	}
-	out.Annotations[annotationConnection] = connName
+	out.Annotations[corev1alpha1.AnnotationConnection] = connName
 	return out
 }
-
-const annotationConnection = "core.kube-bind.io/connection"
 
 func crdHash(crd *apiextensionsv1.CustomResourceDefinition) string {
 	h := sha256.New()

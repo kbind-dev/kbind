@@ -42,6 +42,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -53,12 +54,19 @@ import (
 
 const cleanupTimeout = 10 * time.Second
 
-// CRDController watches managed CRDs and runs a per-GVR syncer for each.
+// ClusterGetter resolves a Connection name to its engaged provider cluster.
+// The multicluster-runtime ConnectionProvider satisfies it.
+type ClusterGetter interface {
+	Get(ctx context.Context, name string) (cluster.Cluster, error)
+}
+
+// CRDController watches managed CRDs and runs a per-GVR syncer for each, wired
+// to the provider's multicluster-runtime engaged cluster.
 type CRDController struct {
 	mgr            ctrl.Manager
 	consumerConfig *rest.Config
 	consumerClient client.Client
-	providers      *providerCache
+	clusters       ClusterGetter
 	recorder       record.EventRecorder
 	resync         time.Duration
 
@@ -72,10 +80,10 @@ type syncContext struct {
 	wg         *sync.WaitGroup
 }
 
-// SetupWithManager registers the CRD controller. It uses a direct (uncached)
-// client for consumer object reads/writes inside the syncers, built from the
-// manager's rest config.
-func SetupWithManager(mgr ctrl.Manager) error {
+// SetupWithManager registers the CRD controller. The consumer side uses a
+// direct (uncached) client built from the manager's rest config; the provider
+// side comes from the multicluster-runtime engaged cluster resolved via clusters.
+func SetupWithManager(mgr ctrl.Manager, clusters ClusterGetter) error {
 	consumerClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		return fmt.Errorf("building direct consumer client: %w", err)
@@ -84,7 +92,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 		mgr:            mgr,
 		consumerConfig: mgr.GetConfig(),
 		consumerClient: consumerClient,
-		providers:      newProviderCache(consumerClient, mgr.GetScheme()),
+		clusters:       clusters,
 		recorder:       mgr.GetEventRecorderFor("kube-bind-konnector"),
 		resync:         time.Minute,
 		contexts:       map[string]*syncContext{},
@@ -108,13 +116,10 @@ func (r *CRDController) Reconcile(ctx context.Context, req reconcile.Request) (r
 			return reconcile.Result{}, err
 		}
 	}
-	if err := r.reconcile(ctx, req.Name, crd); err != nil {
-		return reconcile.Result{}, err
-	}
-	return reconcile.Result{}, nil
+	return r.reconcile(ctx, req.Name, crd)
 }
 
-func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiextensionsv1.CustomResourceDefinition) error {
+func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiextensionsv1.CustomResourceDefinition) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx).WithValues("crd", name)
 	deleted := crd == nil || crd.DeletionTimestamp != nil
 	var generation int64
@@ -127,7 +132,7 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	if found || deleted {
 		if !deleted && c.generation >= generation {
 			r.lock.Unlock()
-			return nil
+			return reconcile.Result{}, nil
 		}
 		if found {
 			log.Info("stopping syncer")
@@ -138,19 +143,39 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	}
 	r.lock.Unlock()
 	if deleted {
-		return nil
+		return reconcile.Result{}, nil
+	}
+
+	// The provider is pinned by the binding that pulled this CRD.
+	connName := crd.Annotations[corev1alpha1.AnnotationConnection]
+	if connName == "" {
+		return reconcile.Result{}, fmt.Errorf("managed CRD %s has no %s annotation", name, corev1alpha1.AnnotationConnection)
+	}
+	// Resolve the multicluster-runtime engaged provider cluster. Until the
+	// Connection is engaged (it engages once Ready), requeue.
+	providerCluster, err := r.clusters.Get(ctx, connName)
+	if err != nil {
+		log.V(4).Info("provider cluster not engaged yet, requeueing", "connection", connName)
+		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	conn := &corev1alpha1.Connection{}
+	if err := r.consumerClient.Get(ctx, client.ObjectKey{Name: connName}, conn); err != nil {
+		return reconcile.Result{}, fmt.Errorf("getting Connection %s: %w", connName, err)
+	}
+	if conn.Status.LocalClusterUID == "" {
+		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	version := storageOrServedVersion(crd)
 	if version == "" {
-		return fmt.Errorf("CRD %s has no served version", name)
+		return reconcile.Result{}, fmt.Errorf("CRD %s has no served version", name)
 	}
 	gvr := schema.GroupVersionResource{Group: crd.Spec.Group, Version: version, Resource: crd.Spec.Names.Plural}
 	gvk := schema.GroupVersionKind{Group: crd.Spec.Group, Version: version, Kind: crd.Spec.Names.Kind}
 
 	dyn, err := dynamicclient.NewForConfig(r.consumerConfig)
 	if err != nil {
-		return err
+		return reconcile.Result{}, err
 	}
 	inf := dynamicinformer.NewFilteredDynamicInformer(dyn, gvr, metav1.NamespaceAll, r.resync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, nil)
 	lister := dynamiclister.New(inf.Informer().GetIndexer(), gvr)
@@ -161,7 +186,9 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 		scope:          crd.Spec.Scope,
 		consumerLister: lister,
 		consumerClient: r.consumerClient,
-		providers:      r.providers,
+		providerClient: providerCluster.GetClient(),
+		providerReader: providerCluster.GetAPIReader(),
+		localUID:       conn.Status.LocalClusterUID,
 		recorder:       r.recorder,
 	}
 
@@ -171,18 +198,23 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 		LogConstructor: func(*reconcile.Request) logr.Logger { return syncLog },
 	})
 	if err != nil {
-		return fmt.Errorf("creating sync controller: %w", err)
+		return reconcile.Result{}, fmt.Errorf("creating sync controller: %w", err)
 	}
 
 	src := newInformerSource(inf)
 	if err := ctrlr.Watch(src); err != nil {
-		return fmt.Errorf("watching consumer informer: %w", err)
+		return reconcile.Result{}, fmt.Errorf("watching consumer informer: %w", err)
+	}
+	// Provider-side watch via the engaged cluster's cache: status/drift events
+	// arrive here instead of being polled.
+	if err := ctrlr.Watch(providerSource(providerCluster.GetCache(), gvk, conn.Status.LocalClusterUID)); err != nil {
+		return reconcile.Result{}, fmt.Errorf("watching provider cluster: %w", err)
 	}
 	if err := ctrlr.Watch(r.bindingSource(gvr.GroupResource(), lister)); err != nil {
-		return fmt.Errorf("watching cluster bindings: %w", err)
+		return reconcile.Result{}, fmt.Errorf("watching cluster bindings: %w", err)
 	}
 	if err := ctrlr.Watch(r.namespacedBindingSource(gvr.GroupResource(), lister)); err != nil {
-		return fmt.Errorf("watching bindings: %w", err)
+		return reconcile.Result{}, fmt.Errorf("watching bindings: %w", err)
 	}
 
 	syncCtx, cancel := context.WithCancel(ctx)
@@ -197,14 +229,14 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	}()
 	if !cache.WaitForCacheSync(syncCtx.Done(), inf.Informer().HasSynced) {
 		cancel()
-		return fmt.Errorf("consumer informer for %s failed to sync", gvr)
+		return reconcile.Result{}, fmt.Errorf("consumer informer for %s failed to sync", gvr)
 	}
 
 	r.lock.Lock()
 	r.contexts[name] = &syncContext{generation: generation, cancel: cancel, wg: wg}
 	r.lock.Unlock()
 	log.Info("started syncer", "gvr", gvr.String())
-	return nil
+	return reconcile.Result{}, nil
 }
 
 func (r *CRDController) bindingSource(gr schema.GroupResource, lister dynamiclister.Lister) source.TypedSource[reconcile.Request] {

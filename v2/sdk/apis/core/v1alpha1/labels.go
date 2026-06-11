@@ -27,6 +27,11 @@ const (
 	// the provider.
 	LabelManaged = "core.kube-bind.io/managed"
 
+	// AnnotationConnection records, on a pulled consumer CRD, the name of the
+	// Connection whose provider it was pulled from. The sync engine uses it to
+	// pin the provider cluster for that API.
+	AnnotationConnection = "core.kube-bind.io/connection"
+
 	// AnnotationConsumerClusterUID records the consumer cluster identity on a
 	// synced provider object (ownership marker).
 	AnnotationConsumerClusterUID = "core.kube-bind.io/consumer-cluster-uid"

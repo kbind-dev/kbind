@@ -30,8 +30,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 	"github.com/kube-bind/kube-bind/v2/konnector/test/e2e/framework"
+	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
 const (
@@ -252,5 +252,3 @@ func widget(name, size string) *unstructured.Unstructured {
 	_ = unstructured.SetNestedField(u.Object, size, "spec", "size")
 	return u
 }
-
-func apiextensionsGVK() (gvk struct{}) { panic("unused") }

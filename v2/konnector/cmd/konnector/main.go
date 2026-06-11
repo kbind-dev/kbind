@@ -106,7 +106,7 @@ func run(metricsAddr string) error {
 	if err := (&binding.NamespacedReconciler{}).SetupWithManager(localMgr); err != nil {
 		return err
 	}
-	if err := syncengine.SetupWithManager(localMgr); err != nil {
+	if err := syncengine.SetupWithManager(localMgr, connProvider); err != nil {
 		return err
 	}
 

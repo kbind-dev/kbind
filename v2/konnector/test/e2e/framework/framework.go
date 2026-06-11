@@ -36,23 +36,25 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	apimachineryruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/binding"
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/connection"
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/provider"
 	syncengine "github.com/kube-bind/kube-bind/v2/konnector/engine/sync"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
@@ -142,31 +144,50 @@ func Start(t *testing.T) *Env {
 	}
 }
 
-// startEngine runs the consumer-side reconcilers (connection, both bindings, and
-// the dynamic sync controller) on a manager pointed at the consumer cluster.
-// The mcr provider is not needed here: the sync path uses direct provider
-// clients in the POC.
+// startEngine wires the full engine the way main.go does: a local (consumer)
+// manager, the mcr ConnectionProvider (each Connection -> engaged provider
+// cluster), the multicluster manager, and the reconcilers — including the
+// sync engine using the engaged cluster (Option B).
 func startEngine(t *testing.T, consumerCfg *rest.Config, scheme *apimachineryruntime.Scheme) {
 	t.Helper()
-	mgr, err := ctrl.NewManager(consumerCfg, ctrl.Options{
+	localMgr, err := ctrl.NewManager(consumerCfg, ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, (&connection.Reconciler{}).SetupWithManager(mgr))
-	require.NoError(t, (&binding.ClusterReconciler{}).SetupWithManager(mgr))
-	require.NoError(t, (&binding.NamespacedReconciler{}).SetupWithManager(mgr))
-	require.NoError(t, syncengine.SetupWithManager(mgr))
+	connProvider, err := provider.New(localMgr, provider.Options{})
+	require.NoError(t, err)
+
+	mcMgr, err := mcmanager.New(consumerCfg, connProvider, mcmanager.Options{
+		Scheme:  scheme,
+		Metrics: metricsserver.Options{BindAddress: "0"},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, (&connection.Reconciler{}).SetupWithManager(localMgr))
+	require.NoError(t, (&binding.ClusterReconciler{}).SetupWithManager(localMgr))
+	require.NoError(t, (&binding.NamespacedReconciler{}).SetupWithManager(localMgr))
+	require.NoError(t, syncengine.SetupWithManager(localMgr, connProvider))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			t.Logf("manager stopped: %v", err)
+		if err := localMgr.Start(ctx); err != nil {
+			t.Logf("local manager stopped: %v", err)
 		}
 	}()
-	require.True(t, mgr.GetCache().WaitForCacheSync(ctx), "engine cache sync")
+	go func() {
+		if err := connProvider.Run(ctx, mcMgr); err != nil {
+			t.Logf("connection provider stopped: %v", err)
+		}
+	}()
+	go func() {
+		if err := mcMgr.Start(ctx); err != nil {
+			t.Logf("mc manager stopped: %v", err)
+		}
+	}()
+	require.True(t, localMgr.GetCache().WaitForCacheSync(ctx), "engine cache sync")
 }
 
 // InstallExportedWidgetCRD installs the demo Widget CRD on the provider, labeled

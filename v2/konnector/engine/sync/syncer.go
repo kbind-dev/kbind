@@ -19,7 +19,6 @@ package sync
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -27,64 +26,34 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/dynamiclister"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
 const (
 	// fieldOwner is the server-side-apply field manager for spec writes.
 	fieldOwner = "kube-bind-konnector"
-	// statusResyncInterval re-checks provider status for drift. POC uses
-	// polling; an event-driven provider watch is the follow-up (proposal #2).
-	statusResyncInterval = 30 * time.Second
+	// statusResyncBackstop is a low-frequency safety net. Provider-originated
+	// changes (status, drift) are primarily delivered by the engaged-cluster
+	// watch; this just heals any missed watch event.
+	statusResyncBackstop = 10 * time.Minute
 )
 
-// providerCache builds and caches a direct provider client per Connection.
-//
-// TODO(v2): use the multicluster-runtime engaged cluster's client/cache instead
-// of a direct client, so per-connection lifecycle comes from the framework.
-type providerCache struct {
-	consumer client.Client
-	scheme   *runtime.Scheme
-
-	mu      sync.Mutex
-	clients map[string]client.Client
-}
-
-func newProviderCache(consumer client.Client, scheme *runtime.Scheme) *providerCache {
-	return &providerCache{consumer: consumer, scheme: scheme, clients: map[string]client.Client{}}
-}
-
-func (p *providerCache) For(ctx context.Context, connName string) (client.Client, *corev1alpha1.Connection, error) {
-	conn := &corev1alpha1.Connection{}
-	if err := p.consumer.Get(ctx, client.ObjectKey{Name: connName}, conn); err != nil {
-		return nil, nil, err
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if cl, ok := p.clients[connName]; ok {
-		return cl, conn, nil
-	}
-	cl, err := remote.ProviderClient(ctx, p.consumer, conn, p.scheme)
-	if err != nil {
-		return nil, nil, err
-	}
-	p.clients[connName] = cl
-	return cl, conn, nil
-}
-
 // specReconciler syncs instances of one GVR: spec consumer->provider (SSA),
-// status provider->consumer, with a finalizer and ownership markers.
+// status provider->consumer, with a finalizer and ownership markers. The
+// provider side is the multicluster-runtime engaged cluster for one Connection:
+// writes go through its client, reads through its API reader (no cache
+// staleness), and provider events arrive via a watch on its cache.
 type specReconciler struct {
 	gvr   schema.GroupVersionResource
 	gvk   schema.GroupVersionKind
@@ -92,8 +61,28 @@ type specReconciler struct {
 
 	consumerLister dynamiclister.Lister
 	consumerClient client.Client // direct, uncached
-	providers      *providerCache
-	recorder       record.EventRecorder
+
+	providerClient client.Client // engaged-cluster client: SSA + delete
+	providerReader client.Reader // engaged-cluster API reader: fresh reads
+	localUID       string        // consumer cluster identity for ownership markers
+
+	recorder record.EventRecorder
+}
+
+// providerSource turns the engaged provider cluster's cache into an event
+// source: a provider object owned by us (matching localUID) enqueues its
+// identity-mapped consumer object. This is what makes status/drift sync
+// event-driven instead of polled.
+func providerSource(c cache.Cache, gvk schema.GroupVersionKind, localUID string) source.TypedSource[reconcile.Request] {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(gvk)
+	return source.Kind(c, client.Object(obj), handler.TypedEnqueueRequestsFromMapFunc(
+		func(_ context.Context, o client.Object) []reconcile.Request {
+			if o.GetAnnotations()[corev1alpha1.AnnotationConsumerClusterUID] != localUID {
+				return nil // not ours (another consumer on a shared provider)
+			}
+			return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: o.GetNamespace(), Name: o.GetName()}}}
+		}))
 }
 
 func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -108,39 +97,21 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	}
 	obj = obj.DeepCopy()
 
-	crdName := CRDNameForGVR(r.gvr)
-	res, err := ResolveConnection(ctx, r.consumerClient, crdName, req.Namespace)
+	// Gate: is there a ready binding covering this object? (Namespaced Bindings
+	// scope which namespaces sync; ClusterBindings cover everything.)
+	res, err := ResolveConnection(ctx, r.consumerClient, CRDNameForGVR(r.gvr), req.Namespace)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("resolving connection: %w", err)
 	}
-	if !res.Found || !res.Ready {
-		// Not bound (or binding not ready): nothing to do; binding changes will
-		// re-trigger. If the object carries our finalizer with no binding, we
-		// still try to release it on deletion below.
-		if obj.GetDeletionTimestamp() == nil {
-			return reconcile.Result{}, nil
-		}
-	}
+	bound := res.Found && res.Ready
 
-	var (
-		providerClient client.Client
-		conn           *corev1alpha1.Connection
-	)
-	if res.Found && res.Ready {
-		providerClient, conn, err = r.providers.For(ctx, res.ConnectionName)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("provider client: %w", err)
-		}
-	}
-
-	localUID := ""
-	if conn != nil {
-		localUID = conn.Status.LocalClusterUID
-	}
-
-	// Deletion.
+	// Deletion: always release our copy, even if the binding is already gone.
 	if obj.GetDeletionTimestamp() != nil {
-		return r.reconcileDelete(ctx, obj, providerClient, localUID)
+		return r.reconcileDelete(ctx, obj)
+	}
+	if !bound {
+		// Not bound yet; binding changes re-trigger this reconcile.
+		return reconcile.Result{}, nil
 	}
 
 	// Ensure finalizer before first write.
@@ -151,16 +122,12 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		return reconcile.Result{Requeue: true}, nil
 	}
 
-	if providerClient == nil {
-		return reconcile.Result{}, nil
-	}
-
-	// Conflict check before first write.
+	// Conflict check before first write (fresh read via the API reader).
 	existing := newUnstructured(r.gvk)
-	getErr := providerClient.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+	getErr := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 	switch {
 	case getErr == nil:
-		if owner, ours := ownershipOf(existing, localUID, string(obj.GetUID())); !ours {
+		if owner, ours := ownershipOf(existing, r.localUID, string(obj.GetUID())); !ours {
 			reason := conflictReason(owner)
 			msg := fmt.Sprintf("provider object %s already exists and is %s; not overwriting (conflictPolicy: Fail)", client.ObjectKeyFromObject(obj), owner)
 			log.Info("conflict: refusing to overwrite provider object", "owner", owner)
@@ -175,7 +142,7 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		}
 	case apierrors.IsNotFound(getErr):
 		if r.scope == apiextensionsv1.NamespaceScoped {
-			if err := ensureNamespace(ctx, providerClient, obj.GetNamespace(), localUID); err != nil {
+			if err := ensureNamespace(ctx, r.providerClient, obj.GetNamespace(), r.localUID); err != nil {
 				return reconcile.Result{}, err
 			}
 		}
@@ -184,36 +151,36 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	}
 
 	// Spec consumer -> provider (SSA).
-	patch := r.providerPatch(obj, localUID)
-	if err := providerClient.Patch(ctx, patch, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
+	patch := r.providerPatch(obj, r.localUID)
+	if err := r.providerClient.Patch(ctx, patch, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 		return reconcile.Result{}, fmt.Errorf("applying spec to provider: %w", err)
 	}
 
 	// Status provider -> consumer.
 	got := newUnstructured(r.gvk)
-	if err := providerClient.Get(ctx, client.ObjectKeyFromObject(obj), got); err != nil {
+	if err := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), got); err != nil {
 		return reconcile.Result{}, fmt.Errorf("reading provider status: %w", err)
 	}
 	if err := r.copyStatus(ctx, got, obj); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	return reconcile.Result{RequeueAfter: statusResyncInterval}, nil
+	return reconcile.Result{RequeueAfter: statusResyncBackstop}, nil
 }
 
-func (r *specReconciler) reconcileDelete(ctx context.Context, obj *unstructured.Unstructured, providerClient client.Client, localUID string) (reconcile.Result, error) {
+func (r *specReconciler) reconcileDelete(ctx context.Context, obj *unstructured.Unstructured) (reconcile.Result, error) {
 	if !controllerutil.ContainsFinalizer(obj, corev1alpha1.FinalizerSyncer) {
 		return reconcile.Result{}, nil
 	}
-	if providerClient != nil {
+	{
 		existing := newUnstructured(r.gvk)
-		err := providerClient.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+		err := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 		switch {
 		case err == nil:
 			// Only delete the provider copy if it is ours. A foreign object that
 			// merely shares the name (a conflict) must never be deleted by us.
-			if _, ours := ownershipOf(existing, localUID, string(obj.GetUID())); ours {
-				if err := providerClient.Delete(ctx, existing); client.IgnoreNotFound(err) != nil {
+			if _, ours := ownershipOf(existing, r.localUID, string(obj.GetUID())); ours {
+				if err := r.providerClient.Delete(ctx, existing); client.IgnoreNotFound(err) != nil {
 					return reconcile.Result{}, fmt.Errorf("deleting provider object: %w", err)
 				}
 				// Wait for the provider copy to be fully gone before releasing.
