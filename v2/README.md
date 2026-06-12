@@ -39,6 +39,10 @@ v2/
   takes over an *un-owned* provider object (never one owned by another binding).
 - The Connection **re-discovers** exported APIs periodically, so a CRD labeled
   `exported` after connect is picked up and its binding goes Ready.
+- Schema knobs are honored: `pullPolicy: Bound`/`All`/`None`, `updatePolicy:
+  Always`/`Once`, and `autoBind` (a managed ClusterBinding mirroring exported
+  APIs). `deletion-policy: Orphan` keeps a provider copy on delete/unbind.
+  Provider RBAC denials surface as a `PermissionDenied` condition / Event.
 - The provider side is the **multicluster-runtime engaged cluster** for each
   Connection: writes go through its client, fresh reads through its API reader,
   and status/drift events arrive via a **watch on its cache** (event-driven, not
@@ -54,9 +58,8 @@ v2/
   the provider — so `kubectl delete -f bundle.yaml` is order-don't-care.
 
 Known POC simplifications (tracked against the proposal): `schema.source:
-OpenAPI`, related resources, `pullPolicy: All`/`None`, `updatePolicy: Always`,
-`autoBind`, `deletion-policy: Orphan` and the provider `Lease` are not
-implemented yet.
+OpenAPI` (the kcp/CRD-less path), related resources, the `Mapper` extension,
+and the provider `Lease` are not implemented yet.
 
 ## Build
 

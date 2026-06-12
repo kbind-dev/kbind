@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -197,6 +198,9 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	ctrlr, err := controller.NewTypedUnmanaged(fmt.Sprintf("sync-%s", gvr.GroupResource().String()), controller.TypedOptions[reconcile.Request]{
 		Reconciler:     rec,
 		LogConstructor: func(*reconcile.Request) logr.Logger { return syncLog },
+		// A CRD can be removed and re-added (same GVR), recreating this
+		// controller with the same name — skip the global uniqueness check.
+		SkipNameValidation: ptr.To(true),
 	})
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("creating sync controller: %w", err)

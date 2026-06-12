@@ -21,14 +21,11 @@ package binding
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/crdpull"
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
@@ -108,8 +106,17 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 			notExported = append(notExported, api.Name)
 			continue
 		}
-		hash, err := b.pullCRD(ctx, providerClient, api.Name, conn.Name)
+		hash, _, err := crdpull.Pull(ctx, b.client, providerClient, api.Name, conn.Name, crdpull.Options{
+			Create: conn.Spec.Schema.PullPolicy != corev1alpha1.PullPolicyNone,
+			Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
+		})
 		if err != nil {
+			if apierrors.IsForbidden(err) {
+				apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionPermissionDenied, metav1.ConditionTrue, corev1alpha1.ReasonForbidden,
+					fmt.Sprintf("pulling CRD %q is forbidden by provider RBAC", api.Name)))
+				setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonForbidden, "provider RBAC denies reading the CRD")
+				return nil
+			}
 			return fmt.Errorf("pulling CRD %q: %w", api.Name, err)
 		}
 		// Count instances we refused to sync due to a foreign provider target.
@@ -139,86 +146,10 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 		apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionConflicts, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no conflicts"))
 	}
 
+	apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionPermissionDenied, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no RBAC denials"))
 	apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionSynced, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "all APIs installed"))
 	setReady(status, obj, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "binding ready")
 	return nil
-}
-
-// pullCRD reads the provider CRD by name and installs it on the consumer
-// (create-if-absent; POC pulls once). It returns a content hash for status.
-func (b *base) pullCRD(ctx context.Context, providerClient client.Client, crdName, connName string) (string, error) {
-	var remoteCRD apiextensionsv1.CustomResourceDefinition
-	if err := providerClient.Get(ctx, client.ObjectKey{Name: crdName}, &remoteCRD); err != nil {
-		return "", fmt.Errorf("reading provider CRD: %w", err)
-	}
-
-	consumerCRD := crdForConsumer(&remoteCRD, connName)
-	hash := crdHash(consumerCRD)
-
-	var existing apiextensionsv1.CustomResourceDefinition
-	err := b.client.Get(ctx, client.ObjectKey{Name: crdName}, &existing)
-	switch {
-	case apierrors.IsNotFound(err):
-		if err := b.client.Create(ctx, consumerCRD); err != nil {
-			return "", fmt.Errorf("creating consumer CRD: %w", err)
-		}
-	case err != nil:
-		return "", fmt.Errorf("getting consumer CRD: %w", err)
-	default:
-		// Already present. updatePolicy: Once for the POC — do not update.
-	}
-	return hash, nil
-}
-
-// crdForConsumer strips the provider CRD down to something installable on the
-// consumer without a conversion webhook: single served/storage version,
-// conversion forced to None, no webhook/caBundle, no ownerRefs/status.
-func crdForConsumer(in *apiextensionsv1.CustomResourceDefinition, connName string) *apiextensionsv1.CustomResourceDefinition {
-	out := in.DeepCopy()
-	out.ResourceVersion = ""
-	out.UID = ""
-	out.ManagedFields = nil
-	out.OwnerReferences = nil
-	out.Status = apiextensionsv1.CustomResourceDefinitionStatus{}
-
-	// Keep only the storage version (fallback: first served), drop the rest, so
-	// no conversion webhook is needed on the consumer.
-	var keep *apiextensionsv1.CustomResourceDefinitionVersion
-	for i := range out.Spec.Versions {
-		v := &out.Spec.Versions[i]
-		if v.Storage {
-			keep = v
-			break
-		}
-		if keep == nil && v.Served {
-			keep = v
-		}
-	}
-	if keep != nil {
-		k := *keep
-		k.Storage = true
-		k.Served = true
-		out.Spec.Versions = []apiextensionsv1.CustomResourceDefinitionVersion{k}
-	}
-	out.Spec.Conversion = &apiextensionsv1.CustomResourceConversion{Strategy: apiextensionsv1.NoneConverter}
-
-	if out.Labels == nil {
-		out.Labels = map[string]string{}
-	}
-	out.Labels[corev1alpha1.LabelManaged] = "true"
-	if out.Annotations == nil {
-		out.Annotations = map[string]string{}
-	}
-	out.Annotations[corev1alpha1.AnnotationConnection] = connName
-	return out
-}
-
-func crdHash(crd *apiextensionsv1.CustomResourceDefinition) string {
-	h := sha256.New()
-	for _, v := range crd.Spec.Versions {
-		_, _ = h.Write([]byte(v.Name))
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 func condition(obj client.Object, t string, s metav1.ConditionStatus, reason, msg string) metav1.Condition {

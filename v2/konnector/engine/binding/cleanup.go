@@ -126,8 +126,9 @@ func (b *base) drainInstances(ctx context.Context, gvr schema.GroupVersionResour
 		if !controllerutil.ContainsFinalizer(inst, corev1alpha1.FinalizerSyncer) {
 			continue
 		}
-		// Delete the provider copy if it is ours (best effort).
-		if providerClient != nil {
+		// Delete the provider copy if it is ours (best effort), unless the
+		// instance opted out with deletion-policy: Orphan.
+		if providerClient != nil && inst.GetAnnotations()[corev1alpha1.AnnotationDeletionPolicy] != corev1alpha1.DeletionPolicyOrphan {
 			if err := deleteProviderCopy(ctx, providerClient, gvr, inst, localUID); err != nil {
 				return err
 			}

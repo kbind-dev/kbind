@@ -46,6 +46,16 @@ const (
 	// conflictCount. Survives status-schema pruning (it is metadata, not status).
 	AnnotationConflict = "core.kube-bind.io/conflict"
 
+	// AnnotationDeletionPolicy on a consumer instance controls what happens to
+	// its provider copy when the consumer object is deleted or unbound. The only
+	// non-default value is "Orphan": release the finalizer without deleting the
+	// provider copy (keep the managed object on the provider).
+	AnnotationDeletionPolicy = "core.kube-bind.io/deletion-policy"
+
+	// DeletionPolicyOrphan keeps the provider copy when the consumer object is
+	// deleted or unbound.
+	DeletionPolicyOrphan = "Orphan"
+
 	// FinalizerSyncer blocks consumer-object deletion until the provider copy
 	// has been removed.
 	FinalizerSyncer = "core.kube-bind.io/syncer"

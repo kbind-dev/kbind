@@ -67,4 +67,6 @@ const (
 	// ReasonOwnedByAnother marks a conflict with an object owned by a different
 	// binding/consumer.
 	ReasonOwnedByAnother = "OwnedByAnother"
+	// ReasonForbidden marks an operation refused by provider RBAC.
+	ReasonForbidden = "Forbidden"
 )

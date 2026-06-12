@@ -45,8 +45,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -72,6 +74,23 @@ type Env struct {
 	ConsumerClient client.Client
 	ProviderDyn    dynamic.Interface
 	ConsumerDyn    dynamic.Interface
+
+	providerEnv *envtest.Environment
+}
+
+// RestrictedProviderSecret creates a Secret on the consumer holding a kubeconfig
+// for a provider user with no RBAC, so the konnector's provider operations are
+// forbidden. Used to exercise the PermissionDenied path.
+func (e *Env) RestrictedProviderSecret(t *testing.T, name string) *corev1.Secret {
+	t.Helper()
+	au, err := e.providerEnv.AddUser(envtest.User{Name: "restricted-konnector"}, nil)
+	require.NoError(t, err, "adding restricted provider user")
+	kubeconfig, err := kubeconfigFromRestConfig(au.Config())
+	require.NoError(t, err)
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KubeBindNamespace},
+		Data:       map[string][]byte{"kubeconfig": kubeconfig},
+	}
 }
 
 // Start brings up two envtest API servers, installs the core CRDs on the
@@ -141,6 +160,7 @@ func Start(t *testing.T) *Env {
 		ConsumerClient: consumerClient,
 		ProviderDyn:    providerDyn,
 		ConsumerDyn:    consumerDyn,
+		providerEnv:    providerEnv,
 	}
 }
 
@@ -153,6 +173,9 @@ func startEngine(t *testing.T, consumerCfg *rest.Config, scheme *apimachineryrun
 	localMgr, err := ctrl.NewManager(consumerCfg, ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
+		// Multiple test envs run in one process; skip the global controller-name
+		// uniqueness check.
+		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
 	})
 	require.NoError(t, err)
 

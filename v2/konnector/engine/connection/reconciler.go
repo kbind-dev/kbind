@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/crdpull"
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
@@ -158,6 +159,9 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 	// 2. Pin and verify cluster identity.
 	remoteUID, err := remote.ClusterUID(ctx, providerClient)
 	if err != nil {
+		if apierrors.IsForbidden(err) {
+			return r.denyPermission(conn, "reading provider cluster identity is forbidden by RBAC: "+err.Error())
+		}
 		setCondition(conn, corev1alpha1.ConditionConnected, metav1.ConditionFalse, corev1alpha1.ReasonPending, err.Error())
 		setNotReady(conn, corev1alpha1.ReasonPending, "cannot reach provider cluster")
 		return nil
@@ -181,12 +185,63 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 	// 3. Discover exported APIs (schema.source: CRD — label-gated).
 	exported, err := discoverExportedCRDs(ctx, providerClient)
 	if err != nil {
+		if apierrors.IsForbidden(err) {
+			return r.denyPermission(conn, "listing exported CRDs is forbidden by RBAC: "+err.Error())
+		}
 		return fmt.Errorf("discovering exported APIs: %w", err)
 	}
 	conn.Status.ExportedAPIs = exported
+	setCondition(conn, corev1alpha1.ConditionPermissionDenied, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no RBAC denials")
+
+	// pullPolicy: All — eagerly install every exported CRD on the consumer,
+	// without waiting for a binding. (Bound/None defer to the binding.)
+	if conn.Spec.Schema.PullPolicy == corev1alpha1.PullPolicyAll {
+		for i := range exported {
+			if _, _, err := crdpull.Pull(ctx, r.Client, providerClient, exported[i].Name, conn.Name, crdpull.Options{
+				Create: true,
+				Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
+			}); err != nil {
+				return fmt.Errorf("eager-pulling CRD %q: %w", exported[i].Name, err)
+			}
+		}
+	}
+
+	// autoBind: maintain a managed ClusterBinding (named after the Connection)
+	// mirroring the exported APIs.
+	if conn.Spec.AutoBind {
+		if err := r.reconcileAutoBind(ctx, conn, exported); err != nil {
+			return fmt.Errorf("reconciling autoBind: %w", err)
+		}
+	}
 
 	setCondition(conn, corev1alpha1.ConditionReady, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "connection ready")
 	return nil
+}
+
+// reconcileAutoBind keeps a managed ClusterBinding named after the Connection in
+// sync with the exported APIs. With no exports it removes the managed binding.
+func (r *Reconciler) reconcileAutoBind(ctx context.Context, conn *corev1alpha1.Connection, exported []corev1alpha1.ExportedAPI) error {
+	cb := &corev1alpha1.ClusterBinding{ObjectMeta: metav1.ObjectMeta{Name: conn.Name}}
+	if len(exported) == 0 {
+		return client.IgnoreNotFound(r.Client.Delete(ctx, cb))
+	}
+	apis := make([]corev1alpha1.APIRef, 0, len(exported))
+	for i := range exported {
+		apis = append(apis, corev1alpha1.APIRef{Name: exported[i].Name})
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cb, func() error {
+		if err := controllerutil.SetControllerReference(conn, cb, r.Scheme); err != nil {
+			return err
+		}
+		if cb.Labels == nil {
+			cb.Labels = map[string]string{}
+		}
+		cb.Labels[corev1alpha1.LabelManaged] = "true"
+		cb.Spec.ConnectionRef = corev1alpha1.ConnectionRef{Name: conn.Name}
+		cb.Spec.APIs = apis
+		return nil
+	})
+	return err
 }
 
 // ensureFinalizers adds the cleanup finalizer to the Connection and to its
@@ -221,6 +276,17 @@ func (r *Reconciler) ensureFinalizers(ctx context.Context, conn *corev1alpha1.Co
 func (r *Reconciler) reconcileDelete(ctx context.Context, conn *corev1alpha1.Connection) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(conn, corev1alpha1.FinalizerCleanup) {
 		return ctrl.Result{}, nil
+	}
+
+	// Explicitly delete the managed autoBind ClusterBinding so it drains; relying
+	// on owner-ref GC would deadlock (this Connection won't finalize until its
+	// bindings are gone, but GC won't remove the owned binding until the
+	// Connection is gone).
+	if conn.Spec.AutoBind {
+		managed := &corev1alpha1.ClusterBinding{ObjectMeta: metav1.ObjectMeta{Name: conn.Name}}
+		if err := r.Client.Delete(ctx, managed); client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	refs, err := r.bindingsReferencing(ctx, conn.Name)
@@ -351,6 +417,13 @@ func setCondition(conn *corev1alpha1.Connection, condType string, status metav1.
 
 func setNotReady(conn *corev1alpha1.Connection, reason, msg string) {
 	setCondition(conn, corev1alpha1.ConditionReady, metav1.ConditionFalse, reason, msg)
+}
+
+// denyPermission marks the Connection as blocked by provider RBAC.
+func (r *Reconciler) denyPermission(conn *corev1alpha1.Connection, msg string) error {
+	setCondition(conn, corev1alpha1.ConditionPermissionDenied, metav1.ConditionTrue, corev1alpha1.ReasonForbidden, msg)
+	setNotReady(conn, corev1alpha1.ReasonForbidden, msg)
+	return nil // level-triggered: resolves when RBAC is granted (re-discovery requeue)
 }
 
 func apiequalStatus(a, b *corev1alpha1.Connection) bool {

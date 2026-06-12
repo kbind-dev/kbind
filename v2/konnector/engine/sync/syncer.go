@@ -145,6 +145,9 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	case apierrors.IsNotFound(getErr):
 		if r.scope == apiextensionsv1.NamespaceScoped {
 			if err := ensureNamespace(ctx, r.providerClient, obj.GetNamespace(), r.localUID); err != nil {
+				if apierrors.IsForbidden(err) {
+					return r.permissionDenied(obj, "creating provider namespace", err), nil
+				}
 				return reconcile.Result{}, err
 			}
 		}
@@ -160,6 +163,9 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	// Spec consumer -> provider (SSA).
 	patch := r.providerPatch(obj, r.localUID)
 	if err := r.providerClient.Patch(ctx, patch, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
+		if apierrors.IsForbidden(err) {
+			return r.permissionDenied(obj, "applying spec to provider", err), nil
+		}
 		return reconcile.Result{}, fmt.Errorf("applying spec to provider: %w", err)
 	}
 
@@ -193,6 +199,17 @@ func (r *specReconciler) markConflict(ctx context.Context, obj *unstructured.Uns
 	return nil
 }
 
+// permissionDenied surfaces a provider RBAC denial as an Event and requeues —
+// it never fails the whole controller, so other objects keep syncing. The denial
+// resolves on its own once RBAC is granted.
+func (r *specReconciler) permissionDenied(obj *unstructured.Unstructured, op string, err error) reconcile.Result {
+	if r.recorder != nil {
+		r.recorder.Event(obj, corev1.EventTypeWarning, corev1alpha1.ReasonForbidden,
+			fmt.Sprintf("%s is forbidden by provider RBAC: %v", op, err))
+	}
+	return reconcile.Result{RequeueAfter: 30 * time.Second}
+}
+
 // clearConflict removes the conflict marker once the object syncs cleanly.
 func (r *specReconciler) clearConflict(ctx context.Context, obj *unstructured.Unstructured) error {
 	if obj.GetAnnotations()[corev1alpha1.AnnotationConflict] == "" {
@@ -209,7 +226,8 @@ func (r *specReconciler) reconcileDelete(ctx context.Context, obj *unstructured.
 	if !controllerutil.ContainsFinalizer(obj, corev1alpha1.FinalizerSyncer) {
 		return reconcile.Result{}, nil
 	}
-	{
+	// deletion-policy: Orphan keeps the provider copy — just release the finalizer.
+	if obj.GetAnnotations()[corev1alpha1.AnnotationDeletionPolicy] != corev1alpha1.DeletionPolicyOrphan {
 		existing := newUnstructured(r.gvk)
 		err := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 		switch {
