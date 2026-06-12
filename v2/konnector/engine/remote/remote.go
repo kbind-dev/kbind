@@ -23,7 +23,10 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -72,18 +75,37 @@ func RestConfigFromConnection(ctx context.Context, c client.Client, conn *corev1
 	return cfg, nil
 }
 
-// ClusterUID returns a stable identity for the cluster behind c, derived from
-// the kube-system namespace UID. This works on plain Kubernetes providers.
+// logicalClusterGVK is kcp's per-workspace singleton identity object.
+var logicalClusterGVK = schema.GroupVersionKind{Group: "core.kcp.io", Version: "v1alpha1", Kind: "LogicalCluster"}
+
+// ClusterUID returns a stable identity for the cluster behind c. It tries, in
+// order:
+//   - the kcp LogicalCluster "cluster" object's UID (kcp / logical clusters,
+//     which have no kube-system namespace) — preferred when present, since only
+//     a kcp-shaped cluster serves core.kcp.io; then
+//   - the kube-system namespace UID (plain Kubernetes).
 //
-// TODO(v2): kcp / logical-cluster providers have no kube-system namespace; the
-// OpenAPI path will need a different identity source (proposal gap #7).
+// A Forbidden error from a source is surfaced (so the caller can report
+// PermissionDenied) rather than silently falling through.
 func ClusterUID(ctx context.Context, c client.Client) (string, error) {
+	lc := &unstructured.Unstructured{}
+	lc.SetGroupVersionKind(logicalClusterGVK)
+	lcErr := c.Get(ctx, types.NamespacedName{Name: "cluster"}, lc)
+	if lcErr == nil && lc.GetUID() != "" {
+		return string(lc.GetUID()), nil
+	}
+	if apierrors.IsForbidden(lcErr) {
+		return "", lcErr
+	}
+
 	var ns corev1.Namespace
-	if err := c.Get(ctx, types.NamespacedName{Name: "kube-system"}, &ns); err != nil {
-		return "", fmt.Errorf("getting kube-system namespace for cluster identity: %w", err)
+	nsErr := c.Get(ctx, types.NamespacedName{Name: "kube-system"}, &ns)
+	if nsErr == nil && ns.UID != "" {
+		return string(ns.UID), nil
 	}
-	if ns.UID == "" {
-		return "", fmt.Errorf("kube-system namespace UID is empty")
+	if apierrors.IsForbidden(nsErr) {
+		return "", nsErr
 	}
-	return string(ns.UID), nil
+
+	return "", fmt.Errorf("cannot determine cluster identity (no LogicalCluster: %v; no kube-system namespace: %v)", lcErr, nsErr)
 }

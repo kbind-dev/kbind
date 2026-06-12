@@ -49,6 +49,11 @@ v2/
   multi-version) are accepted; the provider stays the enforcing side.
 - The konnector maintains a `coordination.k8s.io/Lease` per Connection on the
   provider (heartbeat) — the hook a service-layer reaper keys off.
+- **kcp-aware cluster identity**: the provider's stable identity is the kcp
+  `LogicalCluster` ("cluster") UID when present (a kcp workspace serves
+  `core.kcp.io`, and has no `kube-system`), falling back to the `kube-system`
+  namespace UID on plain Kubernetes. A provider RBAC denial on the identity read
+  surfaces as `PermissionDenied`.
 - `relatedResources` sync selected Secrets/ConfigMaps in the declared direction,
   scoped like the binding, GC'd when they stop matching or on unbind.
 - The provider side is the **multicluster-runtime engaged cluster** for each
@@ -67,9 +72,7 @@ v2/
 
 Known POC simplifications (tracked against the proposal): the `Mapper`
 extension is not implemented; OpenAPI synthesis is best-effort (fidelity limits
-above); cluster identity still derives from the `kube-system` namespace UID, so
-true kcp logical clusters (no kube-system) need an alternative identity source;
-and syncer stop-on-disengage + productionization (RBAC/HA/Helm) remain.
+above); and syncer stop-on-disengage + productionization (RBAC/HA/Helm) remain.
 
 ## Build
 

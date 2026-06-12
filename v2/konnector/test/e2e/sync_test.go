@@ -296,7 +296,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 			},
 		},
 		{
-			// Tier 1: a Connection already Ready picks up a CRD exported later.
+			// Re-discovery: a Connection already Ready picks up a CRD exported later.
 			name: "re-discovery: a CRD exported after connect is picked up",
 			step: func(t *testing.T) {
 				env.InstallExportedCRD(t, "gadget.io", "gadgets", "gadget", "Gadget")
@@ -311,7 +311,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 			},
 		},
 		{
-			// Tier 1: conflictPolicy Adopt takes over an un-owned provider object.
+			// conflictPolicy Adopt takes over an un-owned provider object.
 			name: "conflictPolicy Adopt takes over an un-owned provider object",
 			step: func(t *testing.T) {
 				gadgetGVR := schema.GroupVersionResource{Group: "gadget.io", Version: "v1", Resource: "gadgets"}

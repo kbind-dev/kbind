@@ -36,6 +36,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apimachineryruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -225,6 +226,58 @@ func (e *Env) CopyProviderSecret(t *testing.T, name string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KubeBindNamespace},
 		Data:       src.Data,
+	}
+}
+
+// MakeProviderKCPLike turns the provider into a kcp-shaped cluster: it installs
+// a LogicalCluster CRD + the singleton "cluster" object (the kcp per-workspace
+// identity object). On a real kcp workspace there is no kube-system namespace,
+// so identity comes from the LogicalCluster; the konnector prefers it whenever
+// it is present (which only a kcp-shaped cluster serves), so we don't need to
+// remove kube-system here (envtest has no namespace controller to finalize it
+// away anyway). Returns the LogicalCluster's UID.
+func (e *Env) MakeProviderKCPLike(t *testing.T, ctx context.Context) string {
+	t.Helper()
+
+	require.NoError(t, e.ProviderClient.Create(ctx, logicalClusterCRD()))
+	lcGVR := schema.GroupVersionResource{Group: "core.kcp.io", Version: "v1alpha1", Resource: "logicalclusters"}
+	require.Eventually(t, func() bool {
+		_, err := e.ProviderDyn.Resource(lcGVR).List(ctx, metav1.ListOptions{})
+		return err == nil
+	}, 30*time.Second, 200*time.Millisecond, "provider should serve LogicalCluster")
+
+	lc := &unstructured.Unstructured{}
+	lc.SetGroupVersionKind(schema.GroupVersionKind{Group: "core.kcp.io", Version: "v1alpha1", Kind: "LogicalCluster"})
+	lc.SetName("cluster")
+	require.NoError(t, e.ProviderClient.Create(ctx, lc))
+	require.NoError(t, e.ProviderClient.Get(ctx, client.ObjectKey{Name: "cluster"}, lc))
+	uid := string(lc.GetUID())
+	require.NotEmpty(t, uid)
+	return uid
+}
+
+func logicalClusterCRD() *apiextensionsv1.CustomResourceDefinition {
+	preserve := true
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "logicalclusters.core.kcp.io"},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "core.kcp.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: "logicalclusters", Singular: "logicalcluster", Kind: "LogicalCluster", ListKind: "LogicalClusterList",
+			},
+			Scope: apiextensionsv1.ClusterScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+				Name: "v1alpha1", Served: true, Storage: true,
+				Schema: &apiextensionsv1.CustomResourceValidation{
+					OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+						Type: "object",
+						Properties: map[string]apiextensionsv1.JSONSchemaProps{
+							"spec": {Type: "object", XPreserveUnknownFields: &preserve},
+						},
+					},
+				},
+			}},
+		},
 	}
 }
 

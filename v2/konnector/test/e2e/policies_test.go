@@ -33,12 +33,12 @@ import (
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
-// TestSlimCoreTier2 exercises the Tier-2 "Decided" features. It shares one
-// envtest pair (spinning a fresh one per case exhausts envtest resources):
+// TestSlimCorePolicies exercises the binding/connection policy knobs. It shares
+// one envtest pair (spinning a fresh one per case exhausts envtest resources):
 // deletion-policy Orphan, updatePolicy Always, autoBind, pullPolicy All, and
 // PermissionDenied. The widgets-dependent cases run first, before the extra
 // Connections (autoBind/All) re-stamp the widgets CRD.
-func TestSlimCoreTier2(t *testing.T) {
+func TestSlimCorePolicies(t *testing.T) {
 	env := framework.Start(t)
 	ctx := context.Background()
 	gvr := env.InstallExportedWidgetCRD(t)
