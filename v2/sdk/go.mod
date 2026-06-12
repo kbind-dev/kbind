@@ -1,6 +1,6 @@
 module github.com/kube-bind/kube-bind/v2/sdk
 
-go 1.24.0
+go 1.26.2
 
 require (
 	k8s.io/apiextensions-apiserver v0.33.4

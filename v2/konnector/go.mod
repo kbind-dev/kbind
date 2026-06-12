@@ -1,6 +1,6 @@
 module github.com/kube-bind/kube-bind/v2/konnector
 
-go 1.24.0
+go 1.26.2
 
 require (
 	github.com/go-logr/logr v1.4.2
