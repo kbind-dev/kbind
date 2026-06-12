@@ -1,0 +1,21 @@
+The kube-bind konnector is installed as "{{ include "konnector.fullname" . }}" in namespace "{{ .Release.Namespace }}".
+
+Replicas:        {{ .Values.replicaCount }}
+Leader election: {{ include "konnector.leaderElect" . }}
+
+Check it is running:
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "konnector.fullname" . }}
+
+Bind a provider API (one apply): create the kubeconfig Secret, a Connection
+referencing it, and a ClusterBinding/Binding selecting the exported APIs. See
+the konnector/config/samples/ directory for examples.
+
+{{- if eq (include "konnector.leaderElect" .) "false" }}
+{{- if gt (int .Values.replicaCount) 1 }}
+
+WARNING: replicaCount > 1 with leader election disabled runs multiple active
+konnectors against the same cluster, which will fight over the same objects.
+Set leaderElect: true (or it is forced on automatically for replicaCount > 1).
+{{- end }}
+{{- end }}

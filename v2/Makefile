@@ -16,6 +16,27 @@ build:
 konnector:
 	cd konnector && go build -o bin/konnector ./cmd/konnector
 
+# Container image. Build context is v2/ so the konnector's `replace ../sdk` resolves.
+IMAGE ?= ghcr.io/kube-bind/konnector:dev
+.PHONY: image
+image:
+	docker build -f konnector/Dockerfile -t $(IMAGE) .
+
+CHART ?= konnector/deploy/charts/konnector
+.PHONY: helm-lint
+helm-lint:
+	helm lint $(CHART)
+
+# Render the chart to stdout for review (extra flags via HELM_ARGS=...).
+.PHONY: helm-template
+helm-template:
+	helm template konnector $(CHART) -n kube-bind $(HELM_ARGS)
+
+# Refresh the chart's bundled CRDs from the generated sdk CRDs.
+.PHONY: helm-sync-crds
+helm-sync-crds: codegen
+	cp sdk/config/crd/core.kube-bind.io_*.yaml $(CHART)/files/crds/
+
 .PHONY: codegen
 codegen:
 	cd sdk && $(CONTROLLER_GEN) object paths=./apis/...

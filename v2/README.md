@@ -84,14 +84,42 @@ v2/
 
 Known POC simplifications (tracked against the proposal): OpenAPI synthesis is
 best-effort (fidelity limits above); the `Mapper` seam exists but only `Identity`
-ships and `relatedResources` are not yet routed through it; and productionization
-(RBAC/HA/Helm) remains.
+ships and `relatedResources` are not yet routed through it.
 
 ## Build
 
 ```sh
 cd v2/konnector && go build ./...      # workspace mode (go.work)
 ```
+
+## Deploy
+
+The konnector runs in (or against) the **consumer** cluster — it is the only
+running component of the core (no backend, no provider-side controllers).
+
+```sh
+cd v2
+make image IMAGE=ghcr.io/kube-bind/konnector:dev          # build the image
+helm install konnector konnector/deploy/charts/konnector \
+  -n kube-bind --create-namespace \
+  --set image.repository=ghcr.io/kube-bind/konnector --set image.tag=dev
+```
+
+The chart ([konnector/deploy/charts/konnector](konnector/deploy/charts/konnector))
+ships the core CRDs (`installCRDs`, default on), a `ServiceAccount`, the consumer
+RBAC (`ClusterRole`/`ClusterRoleBinding` + a namespaced leader-election `Role`),
+and the `Deployment` with liveness/readiness probes. Notable values:
+
+- `replicaCount` / `leaderElect` — HA. Leader election gates all consumer-side
+  controllers, so standby replicas engage no providers until they win the lease.
+  It is forced on automatically when `replicaCount > 1`.
+- `rbac.boundResourceGroups` (default `["*"]`) — the API groups the konnector may
+  sync. The bound APIs are open-ended, so this defaults to all groups; narrow it
+  to the specific groups your providers export to shrink the blast radius.
+
+Provider credentials are governed by the kubeconfig in each `Connection`'s
+Secret, **not** the konnector's ServiceAccount — the RBAC above is consumer-side
+only.
 
 ## Codegen (after editing types)
 

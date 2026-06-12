@@ -1,0 +1,77 @@
+# Default values for the konnector chart.
+
+image:
+  repository: ghcr.io/kube-bind/konnector
+  # Defaults to the chart appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Number of konnector replicas. >1 requires leaderElect (only one is active at a
+# time; the rest are warm standbys).
+replicaCount: 1
+
+# Leader election ensures a single active replica. Enable for HA / replicaCount>1.
+# It is forced on automatically whenever replicaCount > 1.
+leaderElect: false
+leaderElectionID: konnector.kube-bind.io
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+  # The konnector syncs instances of the bound (provider-exported) APIs on this
+  # consumer cluster. Those APIs are open-ended, so by default it is granted the
+  # standard verbs on all API groups. Narrow this to the specific groups your
+  # providers export (e.g. ["mounts.example.org", "example.org"]) to tighten the
+  # blast radius — but bindings for groups not listed here will fail to sync.
+  boundResourceGroups:
+    - "*"
+
+# Extra args appended to the konnector command.
+extraArgs: []
+
+metrics:
+  # Port the controller-runtime metrics endpoint binds to (matches --metrics-bind-address).
+  port: 8085
+
+healthProbe:
+  # Port the health/readiness probe endpoint binds to (matches --health-probe-bind-address).
+  port: 8081
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Install the core CRDs (Connection, ClusterBinding, Binding) with the release.
+# Set false if they are managed out-of-band.
+installCRDs: true

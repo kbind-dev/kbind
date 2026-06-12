@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
@@ -49,21 +50,34 @@ func init() {
 	utilRuntimeMust(corev1alpha1.AddToScheme(scheme))
 }
 
+// options holds the konnector's runtime flags.
+type options struct {
+	metricsAddr      string
+	probeAddr        string
+	leaderElect      bool
+	leaderElectionID string
+}
+
 func main() {
-	var metricsAddr string
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8085", "address the metric endpoint binds to")
+	var o options
+	flag.StringVar(&o.metricsAddr, "metrics-bind-address", ":8085", "address the metric endpoint binds to")
+	flag.StringVar(&o.probeAddr, "health-probe-bind-address", ":8081", "address the health/readiness probe endpoint binds to")
+	flag.BoolVar(&o.leaderElect, "leader-elect", false,
+		"enable leader election, ensuring only one active konnector replica (required for HA / multiple replicas)")
+	flag.StringVar(&o.leaderElectionID, "leader-election-id", "konnector.kube-bind.io",
+		"name of the Lease used for leader election")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if err := run(metricsAddr); err != nil {
+	if err := run(o); err != nil {
 		ctrl.Log.Error(err, "konnector exited with error")
 		os.Exit(1)
 	}
 }
 
-func run(metricsAddr string) error {
+func run(o options) error {
 	ctx := ctrl.SetupSignalHandler()
 	log := ctrl.Log.WithName("konnector")
 
@@ -73,11 +87,23 @@ func run(metricsAddr string) error {
 	}
 
 	// Local (consumer) manager: owns the core CRDs and the consumer-side caches.
+	// Leader election gates all consumer-side controllers, so standby replicas
+	// engage no provider clusters and run no syncers until they win the lease.
 	localMgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:  scheme,
-		Metrics: metricsserver.Options{BindAddress: metricsAddr},
+		Scheme:                        scheme,
+		Metrics:                       metricsserver.Options{BindAddress: o.metricsAddr},
+		HealthProbeBindAddress:        o.probeAddr,
+		LeaderElection:                o.leaderElect,
+		LeaderElectionID:              o.leaderElectionID,
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
+		return err
+	}
+	if err := localMgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return err
+	}
+	if err := localMgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return err
 	}
 

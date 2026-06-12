@@ -1,0 +1,8 @@
+# Patterns to ignore when building Helm packages.
+.DS_Store
+.git/
+.gitignore
+*.tmpl
+*.gotmpl
+.idea/
+*.tgz
