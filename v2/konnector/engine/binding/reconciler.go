@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -49,7 +50,17 @@ type base struct {
 	client    client.Client
 	dyn       dynamic.Interface
 	scheme    *runtime.Scheme
+	resync    time.Duration
 	newClient func(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error)
+}
+
+// resyncInterval is how often a Ready binding re-reconciles to refresh
+// conflictCount (conflicts are detected by the syncer, not via binding events).
+func (b *base) resyncInterval() time.Duration {
+	if b.resync > 0 {
+		return b.resync
+	}
+	return 30 * time.Second
 }
 
 func (b *base) providerClient(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error) {
@@ -60,7 +71,9 @@ func (b *base) providerClient(ctx context.Context, conn *corev1alpha1.Connection
 }
 
 // reconcileAccessor drives a binding (cluster or namespaced) toward Ready.
-func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAccessor) error {
+// namespace scopes conflict counting: "" for a ClusterBinding (cluster-wide),
+// the Binding's namespace otherwise.
+func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAccessor, namespace string) error {
 	spec := obj.BindingSpecP()
 	status := obj.BindingStatusP()
 
@@ -99,7 +112,12 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 		if err != nil {
 			return fmt.Errorf("pulling CRD %q: %w", api.Name, err)
 		}
-		boundAPIs = append(boundAPIs, corev1alpha1.BoundAPI{Name: exported.Name, CRDHash: hash})
+		// Count instances we refused to sync due to a foreign provider target.
+		var conflicts int32
+		if gvr, ok, gerr := b.gvrFor(ctx, api.Name); gerr == nil && ok {
+			conflicts = b.countConflicts(ctx, gvr, namespace)
+		}
+		boundAPIs = append(boundAPIs, corev1alpha1.BoundAPI{Name: exported.Name, CRDHash: hash, ConflictCount: conflicts})
 	}
 	sort.Slice(boundAPIs, func(i, j int) bool { return boundAPIs[i].Name < boundAPIs[j].Name })
 	status.BoundAPIs = boundAPIs
@@ -108,6 +126,17 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 		setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonAPINotExported,
 			fmt.Sprintf("APIs not exported by the provider yet: %s", strings.Join(notExported, ", ")))
 		return nil
+	}
+
+	var totalConflicts int32
+	for _, ba := range boundAPIs {
+		totalConflicts += ba.ConflictCount
+	}
+	if totalConflicts > 0 {
+		apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionConflicts, metav1.ConditionTrue, corev1alpha1.ReasonForeignObjectExists,
+			fmt.Sprintf("%d object(s) skipped due to foreign ownership; see object Events", totalConflicts)))
+	} else {
+		apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionConflicts, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no conflicts"))
 	}
 
 	apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionSynced, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "all APIs installed"))
@@ -209,7 +238,12 @@ func setReady(status *corev1alpha1.BindingStatus, obj client.Object, s metav1.Co
 // ----- ClusterBinding -----
 
 // ClusterReconciler reconciles ClusterBinding objects.
-type ClusterReconciler struct{ base }
+type ClusterReconciler struct {
+	base
+	// Resync is how often a Ready binding re-reconciles to refresh conflictCount
+	// (0 = default 30s).
+	Resync time.Duration
+}
 
 // SetupWithManager registers the ClusterBinding reconciler. It also watches
 // Connection so bindings re-reconcile when their connection becomes Ready or
@@ -217,6 +251,7 @@ type ClusterReconciler struct{ base }
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.base.client = mgr.GetClient()
 	r.base.scheme = mgr.GetScheme()
+	r.base.resync = r.Resync
 	dyn, err := dynamic.NewForConfig(mgr.GetConfig())
 	if err != nil {
 		return err
@@ -264,25 +299,31 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, r.base.client.Update(ctx, cb)
 	}
 	orig := cb.DeepCopy()
-	rerr := r.base.reconcileAccessor(ctx, cb)
+	rerr := r.base.reconcileAccessor(ctx, cb, "")
 	if !equalBindingStatus(&orig.Status, &cb.Status) {
 		if err := r.base.client.Status().Update(ctx, cb); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	return ctrl.Result{}, rerr
+	return ctrl.Result{RequeueAfter: r.base.resyncInterval()}, rerr
 }
 
 // ----- Binding (namespaced) -----
 
 // NamespacedReconciler reconciles Binding objects.
-type NamespacedReconciler struct{ base }
+type NamespacedReconciler struct {
+	base
+	// Resync is how often a Ready binding re-reconciles to refresh conflictCount
+	// (0 = default 30s).
+	Resync time.Duration
+}
 
 // SetupWithManager registers the Binding reconciler. It also watches Connection
 // so bindings re-reconcile when their connection becomes Ready (level-triggered).
 func (r *NamespacedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.base.client = mgr.GetClient()
 	r.base.scheme = mgr.GetScheme()
+	r.base.resync = r.Resync
 	dyn, err := dynamic.NewForConfig(mgr.GetConfig())
 	if err != nil {
 		return err
@@ -331,13 +372,13 @@ func (r *NamespacedReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, r.base.client.Update(ctx, b)
 	}
 	orig := b.DeepCopy()
-	rerr := r.base.reconcileAccessor(ctx, b)
+	rerr := r.base.reconcileAccessor(ctx, b, b.Namespace)
 	if !equalBindingStatus(&orig.Status, &b.Status) {
 		if err := r.base.client.Status().Update(ctx, b); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	return ctrl.Result{}, rerr
+	return ctrl.Result{RequeueAfter: r.base.resyncInterval()}, rerr
 }
 
 func equalBindingStatus(a, b *corev1alpha1.BindingStatus) bool {

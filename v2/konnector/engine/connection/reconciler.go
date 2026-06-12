@@ -52,6 +52,16 @@ type Reconciler struct {
 	// Connection. Overridable in tests; defaults to a fresh client from the
 	// resolved kubeconfig.
 	NewProviderClient func(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error)
+	// DiscoveryResync is how often a Ready Connection re-discovers exported APIs
+	// (so a CRD labeled exported after connect is picked up). 0 = default 30s.
+	DiscoveryResync time.Duration
+}
+
+func (r *Reconciler) discoveryResync() time.Duration {
+	if r.DiscoveryResync > 0 {
+		return r.DiscoveryResync
+	}
+	return 30 * time.Second
 }
 
 // SetupWithManager registers the reconciler with the consumer manager. It also
@@ -126,7 +136,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 	}
-	return ctrl.Result{}, reconcileErr
+	// Periodically re-discover so a CRD labeled exported after connect is picked
+	// up (the binding watches the Connection and reacts to exportedAPIs changes).
+	result := ctrl.Result{}
+	if reconcileErr == nil {
+		result.RequeueAfter = r.discoveryResync()
+	}
+	return result, reconcileErr
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connection) error {

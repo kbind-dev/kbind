@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic/dynamiclister"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -128,17 +129,18 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	switch {
 	case getErr == nil:
 		if owner, ours := ownershipOf(existing, r.localUID, string(obj.GetUID())); !ours {
-			reason := conflictReason(owner)
-			msg := fmt.Sprintf("provider object %s already exists and is %s; not overwriting (conflictPolicy: Fail)", client.ObjectKeyFromObject(obj), owner)
-			log.Info("conflict: refusing to overwrite provider object", "owner", owner)
-			// Surface on the object's own condition (best-effort: pruned if the
-			// CRD's status schema has no conditions) AND as an Event (always).
-			setObjCondition(obj, metav1.ConditionFalse, reason, msg)
-			_ = r.consumerClient.Status().Update(ctx, obj)
-			if r.recorder != nil {
-				r.recorder.Event(obj, corev1.EventTypeWarning, reason, msg)
+			// Adopt only takes an un-owned (markerless) object; it never steals
+			// one already owned by another binding/consumer.
+			if owner != ownerForeignUnmanaged || res.ConflictPolicy != corev1alpha1.ConflictPolicyAdopt {
+				reason := conflictReason(owner)
+				msg := fmt.Sprintf("provider object %s already exists and is %s; not overwriting (conflictPolicy: %s)", client.ObjectKeyFromObject(obj), owner, policyOrFail(res.ConflictPolicy))
+				log.Info("conflict: refusing to overwrite provider object", "owner", owner)
+				if err := r.markConflict(ctx, obj, reason, msg); err != nil {
+					return reconcile.Result{}, err
+				}
+				return reconcile.Result{}, nil
 			}
-			return reconcile.Result{}, nil
+			log.Info("adopting un-owned provider object", "key", client.ObjectKeyFromObject(obj))
 		}
 	case apierrors.IsNotFound(getErr):
 		if r.scope == apiextensionsv1.NamespaceScoped {
@@ -148,6 +150,11 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		}
 	default:
 		return reconcile.Result{}, fmt.Errorf("provider get: %w", getErr)
+	}
+
+	// We are syncing — clear any stale conflict marker from a previous round.
+	if err := r.clearConflict(ctx, obj); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// Spec consumer -> provider (SSA).
@@ -166,6 +173,36 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	}
 
 	return reconcile.Result{RequeueAfter: statusResyncBackstop}, nil
+}
+
+// markConflict records a conflict durably (an annotation that survives status
+// pruning, used by bindings to count conflicts), best-effort on the object's
+// own condition, and as an Event.
+func (r *specReconciler) markConflict(ctx context.Context, obj *unstructured.Unstructured, reason, msg string) error {
+	if obj.GetAnnotations()[corev1alpha1.AnnotationConflict] != reason {
+		p := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, corev1alpha1.AnnotationConflict, reason)
+		if err := r.consumerClient.Patch(ctx, obj, client.RawPatch(types.MergePatchType, p)); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("marking conflict: %w", err)
+		}
+	}
+	setObjCondition(obj, metav1.ConditionFalse, reason, msg)
+	_ = r.consumerClient.Status().Update(ctx, obj)
+	if r.recorder != nil {
+		r.recorder.Event(obj, corev1.EventTypeWarning, reason, msg)
+	}
+	return nil
+}
+
+// clearConflict removes the conflict marker once the object syncs cleanly.
+func (r *specReconciler) clearConflict(ctx context.Context, obj *unstructured.Unstructured) error {
+	if obj.GetAnnotations()[corev1alpha1.AnnotationConflict] == "" {
+		return nil
+	}
+	p := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:null}}}`, corev1alpha1.AnnotationConflict)
+	if err := r.consumerClient.Patch(ctx, obj, client.RawPatch(types.MergePatchType, p)); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("clearing conflict: %w", err)
+	}
+	return nil
 }
 
 func (r *specReconciler) reconcileDelete(ctx context.Context, obj *unstructured.Unstructured) (reconcile.Result, error) {
@@ -241,6 +278,13 @@ func newUnstructured(gvk schema.GroupVersionKind) *unstructured.Unstructured {
 	return u
 }
 
+// Ownership classifications returned by ownershipOf.
+const (
+	ownerForeignUnmanaged = "foreign-unmanaged"
+	ownerOurs             = "ours"
+	ownerByAnother        = "owned-by-another"
+)
+
 // ownershipOf reports the marker owner of a provider object and whether it is
 // ours (our consumer cluster + our consumer object UID).
 func ownershipOf(obj *unstructured.Unstructured, localUID, consumerObjUID string) (string, bool) {
@@ -248,19 +292,26 @@ func ownershipOf(obj *unstructured.Unstructured, localUID, consumerObjUID string
 	cluster := ann[corev1alpha1.AnnotationConsumerClusterUID]
 	objUID := ann[corev1alpha1.AnnotationConsumerObjectUID]
 	if cluster == "" && objUID == "" {
-		return "foreign-unmanaged", false
+		return ownerForeignUnmanaged, false
 	}
 	if cluster == localUID && objUID == consumerObjUID {
-		return "ours", true
+		return ownerOurs, true
 	}
-	return "owned-by-another", false
+	return ownerByAnother, false
 }
 
 func conflictReason(owner string) string {
-	if owner == "foreign-unmanaged" {
+	if owner == ownerForeignUnmanaged {
 		return corev1alpha1.ReasonForeignObjectExists
 	}
 	return corev1alpha1.ReasonOwnedByAnother
+}
+
+func policyOrFail(p corev1alpha1.ConflictPolicy) corev1alpha1.ConflictPolicy {
+	if p == "" {
+		return corev1alpha1.ConflictPolicyFail
+	}
+	return p
 }
 
 func setObjCondition(obj *unstructured.Unstructured, status metav1.ConditionStatus, reason, msg string) {

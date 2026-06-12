@@ -39,6 +39,8 @@ type Resolution struct {
 	Ready bool
 	// ConnectionName is the Connection the binding references.
 	ConnectionName string
+	// ConflictPolicy is the binding's conflict policy (Fail if unset).
+	ConflictPolicy corev1alpha1.ConflictPolicy
 }
 
 // ResolveConnection finds the binding that covers crdName for the given
@@ -61,6 +63,7 @@ func ResolveConnection(ctx context.Context, c client.Client, crdName, namespace 
 				Found:          true,
 				Ready:          apimeta.IsStatusConditionTrue(cb.Status.Conditions, corev1alpha1.ConditionReady),
 				ConnectionName: cb.Spec.ConnectionRef.Name,
+				ConflictPolicy: cb.Spec.ConflictPolicy,
 			}, nil
 		}
 	}
@@ -80,6 +83,7 @@ func ResolveConnection(ctx context.Context, c client.Client, crdName, namespace 
 					Found:          true,
 					Ready:          apimeta.IsStatusConditionTrue(b.Status.Conditions, corev1alpha1.ConditionReady),
 					ConnectionName: b.Spec.ConnectionRef.Name,
+					ConflictPolicy: b.Spec.ConflictPolicy,
 				}, nil
 			}
 		}

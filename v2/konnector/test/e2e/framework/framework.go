@@ -165,9 +165,10 @@ func startEngine(t *testing.T, consumerCfg *rest.Config, scheme *apimachineryrun
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, (&connection.Reconciler{}).SetupWithManager(localMgr))
-	require.NoError(t, (&binding.ClusterReconciler{}).SetupWithManager(localMgr))
-	require.NoError(t, (&binding.NamespacedReconciler{}).SetupWithManager(localMgr))
+	// Short resync intervals so re-discovery and conflictCount refresh fast in tests.
+	require.NoError(t, (&connection.Reconciler{DiscoveryResync: time.Second}).SetupWithManager(localMgr))
+	require.NoError(t, (&binding.ClusterReconciler{Resync: time.Second}).SetupWithManager(localMgr))
+	require.NoError(t, (&binding.NamespacedReconciler{Resync: time.Second}).SetupWithManager(localMgr))
 	require.NoError(t, syncengine.SetupWithManager(localMgr, connProvider))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,15 +208,19 @@ func (e *Env) CopyProviderSecret(t *testing.T, name string) *corev1.Secret {
 // InstallExportedWidgetCRD installs the demo Widget CRD on the provider, labeled
 // as exported.
 func (e *Env) InstallExportedWidgetCRD(t *testing.T) schema.GroupVersionResource {
+	return e.InstallExportedCRD(t, "example.org", "widgets", "widget", "Widget")
+}
+
+// InstallExportedCRD installs a namespaced CRD on the provider labeled as
+// exported, and waits for the provider to serve it.
+func (e *Env) InstallExportedCRD(t *testing.T, group, plural, singular, kind string) schema.GroupVersionResource {
 	t.Helper()
-	crd := widgetCRD()
-	require.NoError(t, e.ProviderClient.Create(context.Background(), crd))
-	gvr := schema.GroupVersionResource{Group: "example.org", Version: "v1", Resource: "widgets"}
-	// Wait for the provider to serve the new API.
+	require.NoError(t, e.ProviderClient.Create(context.Background(), exportedCRD(group, plural, singular, kind)))
+	gvr := schema.GroupVersionResource{Group: group, Version: "v1", Resource: plural}
 	require.Eventually(t, func() bool {
 		_, err := e.ProviderDyn.Resource(gvr).Namespace("default").List(context.Background(), metav1.ListOptions{})
 		return err == nil
-	}, 30*time.Second, 200*time.Millisecond, "provider should serve the Widget API")
+	}, 30*time.Second, 200*time.Millisecond, "provider should serve the %s API", kind)
 	return gvr
 }
 
@@ -224,20 +229,20 @@ func WidgetGVK() schema.GroupVersionKind {
 	return schema.GroupVersionKind{Group: "example.org", Version: "v1", Kind: "Widget"}
 }
 
-func widgetCRD() *apiextensionsv1.CustomResourceDefinition {
+func exportedCRD(group, plural, singular, kind string) *apiextensionsv1.CustomResourceDefinition {
 	preserve := true
 	return &apiextensionsv1.CustomResourceDefinition{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "widgets.example.org",
+			Name:   plural + "." + group,
 			Labels: map[string]string{corev1alpha1.LabelExported: "true"},
 		},
 		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: "example.org",
+			Group: group,
 			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural:   "widgets",
-				Singular: "widget",
-				Kind:     "Widget",
-				ListKind: "WidgetList",
+				Plural:   plural,
+				Singular: singular,
+				Kind:     kind,
+				ListKind: kind + "List",
 			},
 			Scope: apiextensionsv1.NamespaceScoped,
 			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
@@ -251,14 +256,8 @@ func widgetCRD() *apiextensionsv1.CustomResourceDefinition {
 					OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
 						Type: "object",
 						Properties: map[string]apiextensionsv1.JSONSchemaProps{
-							"spec": {
-								Type:                   "object",
-								XPreserveUnknownFields: &preserve,
-							},
-							"status": {
-								Type:                   "object",
-								XPreserveUnknownFields: &preserve,
-							},
+							"spec":   {Type: "object", XPreserveUnknownFields: &preserve},
+							"status": {Type: "object", XPreserveUnknownFields: &preserve},
 						},
 					},
 				},

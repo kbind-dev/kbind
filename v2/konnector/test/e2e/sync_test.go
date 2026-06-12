@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -209,6 +210,27 @@ func TestSlimCoreHappyCase(t *testing.T) {
 					size, _, _ := unstructured.NestedString(obj.Object, "spec", "size")
 					return size != "PROVIDER-OWNED" || obj.GetLabels()[corev1alpha1.LabelManaged] == "true"
 				}, 5*time.Second, 500*time.Millisecond, "foreign provider object must not be overwritten")
+
+				// The consumer object is marked with the conflict annotation.
+				require.Eventually(t, func() bool {
+					o, err := consumerWidgets.Get(ctx, "conflict-widget", metav1.GetOptions{})
+					return err == nil && o.GetAnnotations()[corev1alpha1.AnnotationConflict] != ""
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "consumer object should carry the conflict annotation")
+
+				// The ClusterBinding surfaces conflictCount + the Conflicts condition.
+				require.Eventually(t, func() bool {
+					cb := &corev1alpha1.ClusterBinding{}
+					if err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "widgets"}, cb); err != nil {
+						return false
+					}
+					var cnt int32
+					for _, ba := range cb.Status.BoundAPIs {
+						if ba.Name == widgetCRDName {
+							cnt = ba.ConflictCount
+						}
+					}
+					return cnt == 1 && isConditionTrue(cb.Status.Conditions, corev1alpha1.ConditionConflicts)
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "ClusterBinding should report conflictCount=1 and Conflicts=True")
 			},
 		},
 		{
@@ -238,6 +260,75 @@ func TestSlimCoreHappyCase(t *testing.T) {
 				require.NoError(t, err, "foreign provider object must survive consumer deletion")
 				size, _, _ := unstructured.NestedString(obj.Object, "spec", "size")
 				require.Equal(t, "PROVIDER-OWNED", size)
+			},
+		},
+		{
+			// Tier 1: a Connection already Ready picks up a CRD exported later.
+			name: "re-discovery: a CRD exported after connect is picked up",
+			step: func(t *testing.T) {
+				env.InstallExportedCRD(t, "gadget.io", "gadgets", "gadget", "Gadget")
+				require.Eventually(t, func() bool {
+					conn := &corev1alpha1.Connection{}
+					if err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "demo-provider"}, conn); err != nil {
+						return false
+					}
+					_, ok := conn.Status.ExportsAPI("gadgets.gadget.io")
+					return ok
+				}, 30*time.Second, 200*time.Millisecond, "Connection should re-discover the newly-exported gadgets API")
+			},
+		},
+		{
+			// Tier 1: conflictPolicy Adopt takes over an un-owned provider object.
+			name: "conflictPolicy Adopt takes over an un-owned provider object",
+			step: func(t *testing.T) {
+				gadgetGVR := schema.GroupVersionResource{Group: "gadget.io", Version: "v1", Resource: "gadgets"}
+				gadgetGVK := schema.GroupVersionKind{Group: "gadget.io", Version: "v1", Kind: "Gadget"}
+				consumerGadgets := env.ConsumerDyn.Resource(gadgetGVR).Namespace(instanceNS)
+				providerGadgets := env.ProviderDyn.Resource(gadgetGVR).Namespace(instanceNS)
+				gadget := func(name, size string) *unstructured.Unstructured {
+					u := &unstructured.Unstructured{}
+					u.SetGroupVersionKind(gadgetGVK)
+					u.SetNamespace(instanceNS)
+					u.SetName(name)
+					_ = unstructured.SetNestedField(u.Object, size, "spec", "size")
+					return u
+				}
+
+				require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.ClusterBinding{
+					ObjectMeta: metav1.ObjectMeta{Name: "gadgets"},
+					Spec: corev1alpha1.BindingSpec{
+						ConnectionRef:  corev1alpha1.ConnectionRef{Name: "demo-provider"},
+						APIs:           []corev1alpha1.APIRef{{Name: "gadgets.gadget.io"}},
+						ConflictPolicy: corev1alpha1.ConflictPolicyAdopt,
+					},
+				}))
+				framework.WaitForConditionTrue(t, func() ([]metav1.Condition, error) {
+					cb := &corev1alpha1.ClusterBinding{}
+					err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "gadgets"}, cb)
+					return cb.Status.Conditions, err
+				}, corev1alpha1.ConditionReady)
+
+				// Pre-create a FOREIGN gadget on the provider (no markers).
+				_, err := providerGadgets.Create(ctx, gadget("shared-gadget", "PROVIDER-OWNED"), metav1.CreateOptions{})
+				require.NoError(t, err)
+				// Create the same-named gadget on the consumer (CRD now pulled).
+				require.Eventually(t, func() bool {
+					_, err := consumerGadgets.Create(ctx, gadget("shared-gadget", "ADOPTED"), metav1.CreateOptions{})
+					return err == nil || apierrors.IsAlreadyExists(err)
+				}, 30*time.Second, 200*time.Millisecond, "consumer Gadget CRD should become creatable")
+
+				// Adopt: the provider object gets our markers and its spec is
+				// overwritten to the consumer's value.
+				require.Eventually(t, func() bool {
+					o, err := providerGadgets.Get(ctx, "shared-gadget", metav1.GetOptions{})
+					if err != nil {
+						return false
+					}
+					size, _, _ := unstructured.NestedString(o.Object, "spec", "size")
+					return size == "ADOPTED" &&
+						o.GetLabels()[corev1alpha1.LabelManaged] == "true" &&
+						o.GetAnnotations()[corev1alpha1.AnnotationConsumerObjectUID] != ""
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "Adopt should take over the un-owned provider object")
 			},
 		},
 		{

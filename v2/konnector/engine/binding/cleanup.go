@@ -84,6 +84,27 @@ func (b *base) cleanup(ctx context.Context, obj corev1alpha1.BindingAccessor, na
 	return nil
 }
 
+// countConflicts counts consumer instances of gvr in scope that the syncer
+// marked as conflicting (the conflict annotation).
+func (b *base) countConflicts(ctx context.Context, gvr schema.GroupVersionResource, namespace string) int32 {
+	ri := b.dyn.Resource(gvr)
+	var lister dynamicLister = ri
+	if namespace != "" {
+		lister = ri.Namespace(namespace)
+	}
+	list, err := lister.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0
+	}
+	var n int32
+	for i := range list.Items {
+		if list.Items[i].GetAnnotations()[corev1alpha1.AnnotationConflict] != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // drainInstances deletes provider copies and releases the syncer finalizer on
 // every consumer instance of gvr in scope.
 func (b *base) drainInstances(ctx context.Context, gvr schema.GroupVersionResource, namespace string, providerClient client.Client, localUID string) error {
