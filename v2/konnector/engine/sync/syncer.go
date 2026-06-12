@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/mapper"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
@@ -67,14 +68,19 @@ type specReconciler struct {
 	providerReader client.Reader // engaged-cluster API reader: fresh reads
 	localUID       string        // consumer cluster identity for ownership markers
 
+	// mapper translates the consumer object key to its provider key. Core uses
+	// mapper.Identity (ns/name unchanged); an out-of-tree build can swap it.
+	mapper mapper.Mapper
+
 	recorder record.EventRecorder
 }
 
 // providerSource turns the engaged provider cluster's cache into an event
-// source: a provider object owned by us (matching localUID) enqueues its
-// identity-mapped consumer object. This is what makes status/drift sync
-// event-driven instead of polled.
-func providerSource(c cache.Cache, gvk schema.GroupVersionKind, localUID string) source.TypedSource[reconcile.Request] {
+// source: a provider object owned by us (matching localUID) enqueues its mapped
+// consumer object. This is what makes status/drift sync event-driven instead of
+// polled. The provider key is mapped back to the consumer key via the Mapper so
+// the request targets the right consumer object under non-identity mappings.
+func providerSource(c cache.Cache, gvr schema.GroupVersionResource, gvk schema.GroupVersionKind, localUID string, m mapper.Mapper) source.TypedSource[reconcile.Request] {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(gvk)
 	return source.Kind(c, client.Object(obj), handler.TypedEnqueueRequestsFromMapFunc(
@@ -82,7 +88,11 @@ func providerSource(c cache.Cache, gvk schema.GroupVersionKind, localUID string)
 			if o.GetAnnotations()[corev1alpha1.AnnotationConsumerClusterUID] != localUID {
 				return nil // not ours (another consumer on a shared provider)
 			}
-			return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: o.GetNamespace(), Name: o.GetName()}}}
+			consumerKey, err := m.ToConsumer(gvr, client.ObjectKey{Namespace: o.GetNamespace(), Name: o.GetName()})
+			if err != nil {
+				return nil
+			}
+			return []reconcile.Request{{NamespacedName: consumerKey}}
 		}))
 }
 
@@ -115,6 +125,14 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 		return reconcile.Result{}, nil
 	}
 
+	// Map the consumer key to the provider key. Core maps identity; an out-of-tree
+	// Mapper can rename/re-namespace. Every provider-side operation below uses
+	// providerKey, never the consumer object's own key.
+	providerKey, err := r.mapper.ToProvider(r.gvr, client.ObjectKeyFromObject(obj))
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("mapping %s to provider: %w", client.ObjectKeyFromObject(obj), err)
+	}
+
 	// Ensure finalizer before first write.
 	if controllerutil.AddFinalizer(obj, corev1alpha1.FinalizerSyncer) {
 		if err := r.consumerClient.Update(ctx, obj); err != nil {
@@ -125,7 +143,7 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 
 	// Conflict check before first write (fresh read via the API reader).
 	existing := newUnstructured(r.gvk)
-	getErr := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+	getErr := r.providerReader.Get(ctx, providerKey, existing)
 	switch {
 	case getErr == nil:
 		if owner, ours := ownershipOf(existing, r.localUID, string(obj.GetUID())); !ours {
@@ -133,18 +151,18 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 			// one already owned by another binding/consumer.
 			if owner != ownerForeignUnmanaged || res.ConflictPolicy != corev1alpha1.ConflictPolicyAdopt {
 				reason := conflictReason(owner)
-				msg := fmt.Sprintf("provider object %s already exists and is %s; not overwriting (conflictPolicy: %s)", client.ObjectKeyFromObject(obj), owner, policyOrFail(res.ConflictPolicy))
+				msg := fmt.Sprintf("provider object %s already exists and is %s; not overwriting (conflictPolicy: %s)", providerKey, owner, policyOrFail(res.ConflictPolicy))
 				log.Info("conflict: refusing to overwrite provider object", "owner", owner)
 				if err := r.markConflict(ctx, obj, reason, msg); err != nil {
 					return reconcile.Result{}, err
 				}
 				return reconcile.Result{}, nil
 			}
-			log.Info("adopting un-owned provider object", "key", client.ObjectKeyFromObject(obj))
+			log.Info("adopting un-owned provider object", "key", providerKey)
 		}
 	case apierrors.IsNotFound(getErr):
 		if r.scope == apiextensionsv1.NamespaceScoped {
-			if err := ensureNamespace(ctx, r.providerClient, obj.GetNamespace(), r.localUID); err != nil {
+			if err := ensureNamespace(ctx, r.providerClient, providerKey.Namespace, r.localUID); err != nil {
 				if apierrors.IsForbidden(err) {
 					return r.permissionDenied(obj, "creating provider namespace", err), nil
 				}
@@ -161,7 +179,7 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 	}
 
 	// Spec consumer -> provider (SSA).
-	patch := r.providerPatch(obj, r.localUID)
+	patch := r.providerPatch(obj, providerKey, r.localUID)
 	if err := r.providerClient.Patch(ctx, patch, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
 		if apierrors.IsForbidden(err) {
 			return r.permissionDenied(obj, "applying spec to provider", err), nil
@@ -171,7 +189,7 @@ func (r *specReconciler) Reconcile(ctx context.Context, req reconcile.Request) (
 
 	// Status provider -> consumer.
 	got := newUnstructured(r.gvk)
-	if err := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), got); err != nil {
+	if err := r.providerReader.Get(ctx, providerKey, got); err != nil {
 		return reconcile.Result{}, fmt.Errorf("reading provider status: %w", err)
 	}
 	if err := r.copyStatus(ctx, got, obj); err != nil {
@@ -228,8 +246,12 @@ func (r *specReconciler) reconcileDelete(ctx context.Context, obj *unstructured.
 	}
 	// deletion-policy: Orphan keeps the provider copy — just release the finalizer.
 	if obj.GetAnnotations()[corev1alpha1.AnnotationDeletionPolicy] != corev1alpha1.DeletionPolicyOrphan {
+		providerKey, err := r.mapper.ToProvider(r.gvr, client.ObjectKeyFromObject(obj))
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("mapping %s to provider: %w", client.ObjectKeyFromObject(obj), err)
+		}
 		existing := newUnstructured(r.gvk)
-		err := r.providerReader.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+		err = r.providerReader.Get(ctx, providerKey, existing)
 		switch {
 		case err == nil:
 			// Only delete the provider copy if it is ours. A foreign object that
@@ -260,11 +282,13 @@ func (r *specReconciler) getConsumerObject(req reconcile.Request) (*unstructured
 }
 
 // providerPatch builds the SSA patch: spec + identity, ownership markers, no
-// status, no consumer-only metadata.
-func (r *specReconciler) providerPatch(obj *unstructured.Unstructured, localUID string) *unstructured.Unstructured {
+// status, no consumer-only metadata. The provider key (from the Mapper) sets the
+// name/namespace, so a non-identity mapping writes to the mapped location while
+// the ownership markers still record the consumer object's identity.
+func (r *specReconciler) providerPatch(obj *unstructured.Unstructured, providerKey mapper.ObjectKey, localUID string) *unstructured.Unstructured {
 	patch := newUnstructured(r.gvk)
-	patch.SetName(obj.GetName())
-	patch.SetNamespace(obj.GetNamespace())
+	patch.SetName(providerKey.Name)
+	patch.SetNamespace(providerKey.Namespace)
 	patch.SetLabels(map[string]string{corev1alpha1.LabelManaged: "true"})
 	patch.SetAnnotations(map[string]string{
 		corev1alpha1.AnnotationConsumerClusterUID: localUID,

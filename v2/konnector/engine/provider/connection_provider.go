@@ -118,16 +118,34 @@ func (p *ConnectionProvider) Reconcile(ctx context.Context, req reconcile.Reques
 	}
 
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	mcMgr := p.mcMgr
+	_, engaged := p.clusters[key]
+	p.lock.Unlock()
 
-	if p.mcMgr == nil {
+	if mcMgr == nil {
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
 	}
-	if _, ok := p.clusters[key]; ok {
+	// A Connection that is no longer Ready (e.g. its credential was revoked, the
+	// provider became unreachable, or RBAC was withdrawn) must be disengaged, not
+	// just left running against a dead cluster. This also covers a Connection
+	// mid-deletion that has already flipped not-Ready.
+	if !isReady(conn) {
+		if engaged {
+			p.disengage(key)
+			log.Info("Disengaged provider cluster (Connection no longer ready)")
+		} else {
+			log.V(4).Info("Connection not ready yet, not engaging")
+		}
 		return reconcile.Result{}, nil
 	}
-	if !isReady(conn) {
-		log.V(4).Info("Connection not ready yet, not engaging")
+	if engaged {
+		return reconcile.Result{}, nil
+	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	// Re-check under the lock in case a concurrent reconcile engaged it.
+	if _, ok := p.clusters[key]; ok {
 		return reconcile.Result{}, nil
 	}
 

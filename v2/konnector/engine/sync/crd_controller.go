@@ -28,6 +28,7 @@ import (
 	"github.com/go-logr/logr"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,6 +43,7 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -50,6 +52,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/mapper"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
@@ -70,21 +73,37 @@ type CRDController struct {
 	clusters       ClusterGetter
 	recorder       record.EventRecorder
 	resync         time.Duration
+	// mapper translates consumer<->provider object keys. Defaults to
+	// mapper.Identity; an out-of-tree build swaps it via WithMapper.
+	mapper mapper.Mapper
 
 	lock     sync.Mutex
 	contexts map[string]*syncContext // by CRD name
 }
 
+// Option configures the CRDController at setup. It is the compile-time seam for
+// out-of-tree konnector builds (e.g. a custom Mapper).
+type Option func(*CRDController)
+
+// WithMapper overrides the consumer<->provider key Mapper (default: Identity).
+func WithMapper(m mapper.Mapper) Option {
+	return func(c *CRDController) { c.mapper = m }
+}
+
 type syncContext struct {
 	generation int64
-	cancel     context.CancelFunc
-	wg         *sync.WaitGroup
+	// cluster is the engaged provider cluster this syncer was built against. A
+	// different instance means the Connection re-engaged and the syncer must be
+	// rebuilt (the old one holds a dead client/cache).
+	cluster cluster.Cluster
+	cancel  context.CancelFunc
+	wg      *sync.WaitGroup
 }
 
 // SetupWithManager registers the CRD controller. The consumer side uses a
 // direct (uncached) client built from the manager's rest config; the provider
 // side comes from the multicluster-runtime engaged cluster resolved via clusters.
-func SetupWithManager(mgr ctrl.Manager, clusters ClusterGetter) error {
+func SetupWithManager(mgr ctrl.Manager, clusters ClusterGetter, opts ...Option) error {
 	consumerClient, err := client.New(mgr.GetConfig(), client.Options{Scheme: mgr.GetScheme()})
 	if err != nil {
 		return fmt.Errorf("building direct consumer client: %w", err)
@@ -96,15 +115,40 @@ func SetupWithManager(mgr ctrl.Manager, clusters ClusterGetter) error {
 		clusters:       clusters,
 		recorder:       mgr.GetEventRecorderFor("kube-bind-konnector"),
 		resync:         time.Minute,
+		mapper:         mapper.Identity{},
 		contexts:       map[string]*syncContext{},
 	}
+	for _, o := range opts {
+		o(r)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&apiextensionsv1.CustomResourceDefinition{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(o client.Object) bool {
-			return o.GetLabels()[corev1alpha1.LabelManaged] == "true"
-		})).
+		For(&apiextensionsv1.CustomResourceDefinition{}, builder.WithPredicates(predicate.NewPredicateFuncs(managedCRD))).
+		// Watch Connections so an engage/disengage (Ready flip) re-evaluates the
+		// syncers of every CRD that Connection pulled — stopping them on disengage
+		// and rebuilding them against the freshly-engaged cluster on re-engage.
+		Watches(&corev1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.crdsForConnection)).
 		Named("managed-crds").
 		Complete(r)
+}
+
+func managedCRD(o client.Object) bool {
+	return o.GetLabels()[corev1alpha1.LabelManaged] == "true"
+}
+
+// crdsForConnection enqueues every managed CRD pulled through the given
+// Connection, so its readiness transitions re-evaluate the per-GVR syncers.
+func (r *CRDController) crdsForConnection(ctx context.Context, conn client.Object) []reconcile.Request {
+	var crds apiextensionsv1.CustomResourceDefinitionList
+	if err := r.consumerClient.List(ctx, &crds, client.MatchingLabels{corev1alpha1.LabelManaged: "true"}); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range crds.Items {
+		if crds.Items[i].Annotations[corev1alpha1.AnnotationConnection] == conn.GetName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: crds.Items[i].Name}})
+		}
+	}
+	return reqs
 }
 
 // Reconcile starts or stops the syncer for a managed CRD.
@@ -122,51 +166,59 @@ func (r *CRDController) Reconcile(ctx context.Context, req reconcile.Request) (r
 
 func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiextensionsv1.CustomResourceDefinition) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx).WithValues("crd", name)
-	deleted := crd == nil || crd.DeletionTimestamp != nil
-	var generation int64
-	if crd != nil {
-		generation = crd.Generation
-	}
 
-	r.lock.Lock()
-	c, found := r.contexts[name]
-	if found || deleted {
-		if !deleted && c.generation >= generation {
-			r.lock.Unlock()
-			return reconcile.Result{}, nil
-		}
-		if found {
-			log.Info("stopping syncer")
-			c.cancel()
-			waitWithTimeout(c.wg, cleanupTimeout)
-			delete(r.contexts, name)
-		}
-	}
-	r.lock.Unlock()
-	if deleted {
+	// The CRD is gone (unbind removed it) — stop the syncer.
+	if crd == nil || crd.DeletionTimestamp != nil {
+		r.stopSyncer(name, log)
 		return reconcile.Result{}, nil
 	}
+	generation := crd.Generation
 
 	// The provider is pinned by the binding that pulled this CRD.
 	connName := crd.Annotations[corev1alpha1.AnnotationConnection]
 	if connName == "" {
 		return reconcile.Result{}, fmt.Errorf("managed CRD %s has no %s annotation", name, corev1alpha1.AnnotationConnection)
 	}
-	// Resolve the multicluster-runtime engaged provider cluster. Until the
-	// Connection is engaged (it engages once Ready), requeue.
+
+	// The syncer must only run while the Connection is Ready (engaged). If the
+	// Connection is gone or no longer Ready, stop the syncer; the Connection watch
+	// re-triggers this reconcile when it becomes Ready again.
+	conn := &corev1alpha1.Connection{}
+	if err := r.consumerClient.Get(ctx, client.ObjectKey{Name: connName}, conn); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.stopSyncer(name, log)
+			return reconcile.Result{}, nil
+		}
+		return reconcile.Result{}, fmt.Errorf("getting Connection %s: %w", connName, err)
+	}
+	if !connectionReady(conn) || conn.Status.LocalClusterUID == "" {
+		r.stopSyncer(name, log)
+		log.V(4).Info("provider not ready; syncer stopped", "connection", connName)
+		return reconcile.Result{}, nil
+	}
+
+	// Resolve the multicluster-runtime engaged provider cluster. A Ready
+	// Connection engages asynchronously, so it may be briefly absent — stop any
+	// stale syncer and requeue.
 	providerCluster, err := r.clusters.Get(ctx, connName)
 	if err != nil {
-		// Not an error: the Connection just isn't engaged yet — requeue and wait.
+		r.stopSyncer(name, log)
 		log.V(4).Info("provider cluster not engaged yet, requeueing", "connection", connName, "reason", err.Error())
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
 	}
-	conn := &corev1alpha1.Connection{}
-	if err := r.consumerClient.Get(ctx, client.ObjectKey{Name: connName}, conn); err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting Connection %s: %w", connName, err)
+
+	// Already syncing this generation against this exact engaged cluster? Done.
+	// A different cluster instance means the Connection re-engaged (after a
+	// disengage) — fall through to rebuild so the syncer tracks the live cluster.
+	r.lock.Lock()
+	if c, found := r.contexts[name]; found && c.generation >= generation && c.cluster == providerCluster {
+		r.lock.Unlock()
+		return reconcile.Result{}, nil
 	}
-	if conn.Status.LocalClusterUID == "" {
-		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
-	}
+	r.lock.Unlock()
+
+	// (Re)build the syncer. Stop any prior one (older generation or dead cluster).
+	r.stopSyncer(name, log)
 
 	version := storageOrServedVersion(crd)
 	if version == "" {
@@ -191,6 +243,7 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 		providerClient: providerCluster.GetClient(),
 		providerReader: providerCluster.GetAPIReader(),
 		localUID:       conn.Status.LocalClusterUID,
+		mapper:         r.mapper,
 		recorder:       r.recorder,
 	}
 
@@ -212,7 +265,7 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	}
 	// Provider-side watch via the engaged cluster's cache: status/drift events
 	// arrive here instead of being polled.
-	if err := ctrlr.Watch(providerSource(providerCluster.GetCache(), gvk, conn.Status.LocalClusterUID)); err != nil {
+	if err := ctrlr.Watch(providerSource(providerCluster.GetCache(), gvr, gvk, conn.Status.LocalClusterUID, r.mapper)); err != nil {
 		return reconcile.Result{}, fmt.Errorf("watching provider cluster: %w", err)
 	}
 	if err := ctrlr.Watch(r.bindingSource(gvr.GroupResource(), lister)); err != nil {
@@ -238,7 +291,7 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	}
 
 	r.lock.Lock()
-	r.contexts[name] = &syncContext{generation: generation, cancel: cancel, wg: wg}
+	r.contexts[name] = &syncContext{generation: generation, cluster: providerCluster, cancel: cancel, wg: wg}
 	r.lock.Unlock()
 	log.Info("started syncer", "gvr", gvr.String())
 	return reconcile.Result{}, nil
@@ -308,6 +361,27 @@ func storageOrServedVersion(crd *apiextensionsv1.CustomResourceDefinition) strin
 		}
 	}
 	return served
+}
+
+// stopSyncer tears down the running syncer for a CRD, if any, and blocks (up to
+// cleanupTimeout) for its goroutines to exit. A no-op when nothing is running.
+func (r *CRDController) stopSyncer(name string, log logr.Logger) {
+	r.lock.Lock()
+	c, found := r.contexts[name]
+	if found {
+		delete(r.contexts, name)
+	}
+	r.lock.Unlock()
+	if !found {
+		return
+	}
+	log.Info("stopping syncer")
+	c.cancel()
+	waitWithTimeout(c.wg, cleanupTimeout)
+}
+
+func connectionReady(conn *corev1alpha1.Connection) bool {
+	return apimeta.IsStatusConditionTrue(conn.Status.Conditions, corev1alpha1.ConditionReady)
 }
 
 func waitWithTimeout(wg *sync.WaitGroup, timeout time.Duration) {

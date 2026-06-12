@@ -60,6 +60,18 @@ v2/
   Connection: writes go through its client, fresh reads through its API reader,
   and status/drift events arrive via a **watch on its cache** (event-driven, not
   polled — a low-frequency resync is only a backstop).
+- **Stop-on-disengage**: a Connection that loses readiness (revoked credential,
+  unreachable provider, withdrawn RBAC) is disengaged, and its per-GVR syncers
+  are torn down rather than left running against a dead cluster. When it becomes
+  Ready again the provider re-engages as a fresh cluster and the syncers are
+  rebuilt against it (a stale syncer would otherwise hold a dead client forever).
+- **Mapper extension point** (`engine/mapper`): the syncer routes every
+  provider-side operation through a `Mapper` that translates the consumer object
+  key to its provider key. Core ships only `Identity` (ns/name unchanged); an
+  out-of-tree build supplies its own via `sync.WithMapper(...)` to restore v1's
+  "Prefixed" key isolation without forking the engine. The interface maps keys
+  only — it cannot change scope (cluster-scoped stays cluster-scoped), and it is
+  deliberately kept out of the CRD API so the core API never promises renaming.
 - **Order-independent apply**: a `Connection` created before its Secret resolves
   when the Secret arrives (the konnector watches referenced Secrets); a binding
   created before its Connection resolves when the Connection goes Ready.
@@ -70,9 +82,10 @@ v2/
   gone, and keeps its Secret alive (via a finalizer) so teardown can still reach
   the provider — so `kubectl delete -f bundle.yaml` is order-don't-care.
 
-Known POC simplifications (tracked against the proposal): the `Mapper`
-extension is not implemented; OpenAPI synthesis is best-effort (fidelity limits
-above); and syncer stop-on-disengage + productionization (RBAC/HA/Helm) remain.
+Known POC simplifications (tracked against the proposal): OpenAPI synthesis is
+best-effort (fidelity limits above); the `Mapper` seam exists but only `Identity`
+ships and `relatedResources` are not yet routed through it; and productionization
+(RBAC/HA/Helm) remains.
 
 ## Build
 
