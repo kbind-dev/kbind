@@ -190,6 +190,20 @@ func startEngine(t *testing.T, consumerCfg *rest.Config, scheme *apimachineryrun
 	require.True(t, localMgr.GetCache().WaitForCacheSync(ctx), "engine cache sync")
 }
 
+// CopyProviderSecret returns a new Secret named `name` in the kube-bind
+// namespace carrying the same provider kubeconfig as the one created by Start.
+// Used to test Connection-before-Secret ordering.
+func (e *Env) CopyProviderSecret(t *testing.T, name string) *corev1.Secret {
+	t.Helper()
+	var src corev1.Secret
+	require.NoError(t, e.ConsumerClient.Get(context.Background(),
+		client.ObjectKey{Namespace: KubeBindNamespace, Name: "demo-provider-kubeconfig"}, &src))
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KubeBindNamespace},
+		Data:       src.Data,
+	}
+}
+
 // InstallExportedWidgetCRD installs the demo Widget CRD on the provider, labeled
 // as exported.
 func (e *Env) InstallExportedWidgetCRD(t *testing.T) schema.GroupVersionResource {

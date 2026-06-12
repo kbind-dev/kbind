@@ -39,6 +39,15 @@ v2/
   Connection: writes go through its client, fresh reads through its API reader,
   and status/drift events arrive via a **watch on its cache** (event-driven, not
   polled — a low-frequency resync is only a backstop).
+- **Order-independent apply**: a `Connection` created before its Secret resolves
+  when the Secret arrives (the konnector watches referenced Secrets); a binding
+  created before its Connection resolves when the Connection goes Ready.
+- **Complete unbind**: `Connection` and bindings carry a cleanup finalizer.
+  Deleting a `ClusterBinding` deletes the provider copies of synced instances,
+  releases instance finalizers, and removes the pulled CRD (cascading the
+  instances). A `Connection` blocks (`DrainingBindings`) until its bindings are
+  gone, and keeps its Secret alive (via a finalizer) so teardown can still reach
+  the provider — so `kubectl delete -f bundle.yaml` is order-don't-care.
 
 Known POC simplifications (tracked against the proposal): `schema.source:
 OpenAPI`, `conflictPolicy: Adopt`, related resources, `autoBind` and the

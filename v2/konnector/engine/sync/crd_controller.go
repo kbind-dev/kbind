@@ -155,8 +155,9 @@ func (r *CRDController) reconcile(ctx context.Context, name string, crd *apiexte
 	// Connection is engaged (it engages once Ready), requeue.
 	providerCluster, err := r.clusters.Get(ctx, connName)
 	if err != nil {
-		log.V(4).Info("provider cluster not engaged yet, requeueing", "connection", connName)
-		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+		// Not an error: the Connection just isn't engaged yet — requeue and wait.
+		log.V(4).Info("provider cluster not engaged yet, requeueing", "connection", connName, "reason", err.Error())
+		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil //nolint:nilerr // not-engaged-yet is a requeue, not an error
 	}
 	conn := &corev1alpha1.Connection{}
 	if err := r.consumerClient.Get(ctx, client.ObjectKey{Name: connName}, conn); err != nil {

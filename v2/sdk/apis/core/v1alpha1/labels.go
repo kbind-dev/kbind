@@ -43,4 +43,11 @@ const (
 	// FinalizerSyncer blocks consumer-object deletion until the provider copy
 	// has been removed.
 	FinalizerSyncer = "core.kube-bind.io/syncer"
+
+	// FinalizerCleanup blocks deletion of a Connection or Binding until the
+	// konnector has unwound what it created: provider copies of synced
+	// instances, pulled CRDs, and instance finalizers. It is also placed on a
+	// Connection's referenced Secret so the credential survives long enough to
+	// reach the provider during teardown.
+	FinalizerCleanup = "core.kube-bind.io/cleanup"
 )

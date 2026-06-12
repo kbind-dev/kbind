@@ -23,13 +23,20 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
@@ -47,7 +54,9 @@ type Reconciler struct {
 	NewProviderClient func(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error)
 }
 
-// SetupWithManager registers the reconciler with the consumer manager.
+// SetupWithManager registers the reconciler with the consumer manager. It also
+// watches Secrets so a Connection created before its kubeconfig Secret resolves
+// as soon as the Secret arrives (order-independent "one apply").
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Client = mgr.GetClient()
 	r.Scheme = mgr.GetScheme()
@@ -56,8 +65,26 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.Connection{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.connectionsForSecret)).
 		Named("connection").
 		Complete(r)
+}
+
+// connectionsForSecret enqueues every Connection whose kubeconfigSecretRef
+// points at the given Secret.
+func (r *Reconciler) connectionsForSecret(ctx context.Context, secret client.Object) []reconcile.Request {
+	var list corev1alpha1.ConnectionList
+	if err := r.Client.List(ctx, &list); err != nil {
+		return nil
+	}
+	var reqs []reconcile.Request
+	for i := range list.Items {
+		ref := list.Items[i].Spec.KubeconfigSecretRef
+		if ref.Namespace == secret.GetNamespace() && ref.Name == secret.GetName() {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Name: list.Items[i].Name}})
+		}
+	}
+	return reqs
 }
 
 func (r *Reconciler) defaultProviderClient(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error) {
@@ -76,6 +103,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	conn := &corev1alpha1.Connection{}
 	if err := r.Client.Get(ctx, req.NamespacedName, conn); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if conn.DeletionTimestamp != nil {
+		return r.reconcileDelete(ctx, conn)
+	}
+
+	// Ensure cleanup finalizers on the Connection and (best effort) its Secret
+	// before doing any work, so teardown can always unwind.
+	if added, err := r.ensureFinalizers(ctx, conn); err != nil {
+		return ctrl.Result{}, err
+	} else if added {
+		return ctrl.Result{}, nil
 	}
 
 	orig := conn.DeepCopy()
@@ -132,6 +171,124 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 
 	setCondition(conn, corev1alpha1.ConditionReady, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "connection ready")
 	return nil
+}
+
+// ensureFinalizers adds the cleanup finalizer to the Connection and to its
+// referenced Secret (so the credential outlives the Connection during a
+// `delete -f` teardown). Returns true if it changed the Connection.
+func (r *Reconciler) ensureFinalizers(ctx context.Context, conn *corev1alpha1.Connection) (bool, error) {
+	// Secret finalizer (best effort: the Secret may not exist yet).
+	ref := conn.Spec.KubeconfigSecretRef
+	var secret corev1.Secret
+	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &secret); err == nil {
+		if controllerutil.AddFinalizer(&secret, corev1alpha1.FinalizerCleanup) {
+			if err := r.Client.Update(ctx, &secret); err != nil {
+				return false, fmt.Errorf("adding finalizer to secret: %w", err)
+			}
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
+
+	if controllerutil.AddFinalizer(conn, corev1alpha1.FinalizerCleanup) {
+		if err := r.Client.Update(ctx, conn); err != nil {
+			return false, fmt.Errorf("adding finalizer to connection: %w", err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// reconcileDelete blocks the Connection from finalizing until no Binding
+// references it (so binding cleanup can still reach the provider through it),
+// then releases the Secret's finalizer and its own.
+func (r *Reconciler) reconcileDelete(ctx context.Context, conn *corev1alpha1.Connection) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(conn, corev1alpha1.FinalizerCleanup) {
+		return ctrl.Result{}, nil
+	}
+
+	refs, err := r.bindingsReferencing(ctx, conn.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if refs > 0 {
+		setCondition(conn, corev1alpha1.ConditionReady, metav1.ConditionFalse, "DrainingBindings",
+			fmt.Sprintf("waiting for %d binding(s) to finish unbinding", refs))
+		if err := r.Client.Status().Update(ctx, conn); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// Release the Secret finalizer — but only if no other Connection still
+	// references the same Secret.
+	ref := conn.Spec.KubeconfigSecretRef
+	if others, err := r.otherConnectionsUsingSecret(ctx, ref, conn.Name); err != nil {
+		return ctrl.Result{}, err
+	} else if others == 0 {
+		var secret corev1.Secret
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &secret); err == nil {
+			if controllerutil.RemoveFinalizer(&secret, corev1alpha1.FinalizerCleanup) {
+				if err := r.Client.Update(ctx, &secret); err != nil {
+					return ctrl.Result{}, fmt.Errorf("releasing secret finalizer: %w", err)
+				}
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(conn, corev1alpha1.FinalizerCleanup)
+	if err := r.Client.Update(ctx, conn); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	return ctrl.Result{}, nil
+}
+
+// otherConnectionsUsingSecret counts Connections other than self whose
+// kubeconfigSecretRef points at the same Secret, so we don't release the
+// Secret finalizer while another Connection still depends on it.
+func (r *Reconciler) otherConnectionsUsingSecret(ctx context.Context, ref corev1alpha1.SecretKeyRef, selfName string) (int, error) {
+	var list corev1alpha1.ConnectionList
+	if err := r.Client.List(ctx, &list); err != nil {
+		return 0, err
+	}
+	var n int
+	for i := range list.Items {
+		c := &list.Items[i]
+		if c.Name == selfName || c.DeletionTimestamp != nil {
+			continue
+		}
+		if c.Spec.KubeconfigSecretRef.Namespace == ref.Namespace && c.Spec.KubeconfigSecretRef.Name == ref.Name {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// bindingsReferencing counts ClusterBindings and Bindings whose connectionRef
+// names this Connection.
+func (r *Reconciler) bindingsReferencing(ctx context.Context, name string) (int, error) {
+	var n int
+	var cbs corev1alpha1.ClusterBindingList
+	if err := r.Client.List(ctx, &cbs); err != nil {
+		return 0, err
+	}
+	for i := range cbs.Items {
+		if cbs.Items[i].Spec.ConnectionRef.Name == name {
+			n++
+		}
+	}
+	var bs corev1alpha1.BindingList
+	if err := r.Client.List(ctx, &bs); err != nil {
+		return 0, err
+	}
+	for i := range bs.Items {
+		if bs.Items[i].Spec.ConnectionRef.Name == name {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // discoverExportedCRDs lists provider CRDs carrying the exported label and maps

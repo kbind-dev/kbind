@@ -33,8 +33,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -45,6 +47,7 @@ import (
 // base holds the shared dependencies and logic for both binding kinds.
 type base struct {
 	client    client.Client
+	dyn       dynamic.Interface
 	scheme    *runtime.Scheme
 	newClient func(ctx context.Context, conn *corev1alpha1.Connection) (client.Client, error)
 }
@@ -214,6 +217,11 @@ type ClusterReconciler struct{ base }
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.base.client = mgr.GetClient()
 	r.base.scheme = mgr.GetScheme()
+	dyn, err := dynamic.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return err
+	}
+	r.base.dyn = dyn
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.ClusterBinding{}).
 		Watches(&corev1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.bindingsForConnection)).
@@ -241,6 +249,20 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.base.client.Get(ctx, req.NamespacedName, cb); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if cb.DeletionTimestamp != nil {
+		if !controllerutil.ContainsFinalizer(cb, corev1alpha1.FinalizerCleanup) {
+			return ctrl.Result{}, nil
+		}
+		// Cluster-wide unbind: clean up cluster-wide and remove the pulled CRDs.
+		if err := r.base.cleanup(ctx, cb, "", true); err != nil {
+			return ctrl.Result{}, err
+		}
+		controllerutil.RemoveFinalizer(cb, corev1alpha1.FinalizerCleanup)
+		return ctrl.Result{}, client.IgnoreNotFound(r.base.client.Update(ctx, cb))
+	}
+	if controllerutil.AddFinalizer(cb, corev1alpha1.FinalizerCleanup) {
+		return ctrl.Result{}, r.base.client.Update(ctx, cb)
+	}
 	orig := cb.DeepCopy()
 	rerr := r.base.reconcileAccessor(ctx, cb)
 	if !equalBindingStatus(&orig.Status, &cb.Status) {
@@ -261,6 +283,11 @@ type NamespacedReconciler struct{ base }
 func (r *NamespacedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.base.client = mgr.GetClient()
 	r.base.scheme = mgr.GetScheme()
+	dyn, err := dynamic.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return err
+	}
+	r.base.dyn = dyn
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.Binding{}).
 		Watches(&corev1alpha1.Connection{}, handler.EnqueueRequestsFromMapFunc(r.bindingsForConnection)).
@@ -287,6 +314,21 @@ func (r *NamespacedReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	b := &corev1alpha1.Binding{}
 	if err := r.base.client.Get(ctx, req.NamespacedName, b); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if b.DeletionTimestamp != nil {
+		if !controllerutil.ContainsFinalizer(b, corev1alpha1.FinalizerCleanup) {
+			return ctrl.Result{}, nil
+		}
+		// Namespaced unbind: clean up only instances in this namespace; the CRD
+		// is shared and stays.
+		if err := r.base.cleanup(ctx, b, b.Namespace, false); err != nil {
+			return ctrl.Result{}, err
+		}
+		controllerutil.RemoveFinalizer(b, corev1alpha1.FinalizerCleanup)
+		return ctrl.Result{}, client.IgnoreNotFound(r.base.client.Update(ctx, b))
+	}
+	if controllerutil.AddFinalizer(b, corev1alpha1.FinalizerCleanup) {
+		return ctrl.Result{}, r.base.client.Update(ctx, b)
 	}
 	orig := b.DeepCopy()
 	rerr := r.base.reconcileAccessor(ctx, b)

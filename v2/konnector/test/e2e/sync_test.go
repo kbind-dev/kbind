@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -239,9 +240,189 @@ func TestSlimCoreHappyCase(t *testing.T) {
 				require.Equal(t, "PROVIDER-OWNED", size)
 			},
 		},
+		{
+			// Gap 1: a Connection created before its Secret must resolve once the
+			// Secret arrives (order-independent "one apply").
+			name: "Connection created before its Secret resolves when the Secret arrives",
+			step: func(t *testing.T) {
+				require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
+					ObjectMeta: metav1.ObjectMeta{Name: "late-provider"},
+					Spec: corev1alpha1.ConnectionSpec{
+						KubeconfigSecretRef: corev1alpha1.SecretKeyRef{
+							Namespace: framework.KubeBindNamespace,
+							Name:      "late-secret",
+							Key:       "kubeconfig",
+						},
+						Schema: corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
+					},
+				}))
+				// It must be not-Ready while the Secret is missing.
+				require.Never(t, func() bool {
+					conn := &corev1alpha1.Connection{}
+					if err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "late-provider"}, conn); err != nil {
+						return false
+					}
+					return isConditionTrue(conn.Status.Conditions, corev1alpha1.ConditionReady)
+				}, 3*time.Second, 500*time.Millisecond, "must not be Ready without its Secret")
+
+				// Now create the Secret (copy of the working one).
+				require.NoError(t, env.ConsumerClient.Create(ctx, env.CopyProviderSecret(t, "late-secret")))
+				framework.WaitForConditionTrue(t, func() ([]metav1.Condition, error) {
+					conn := &corev1alpha1.Connection{}
+					err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "late-provider"}, conn)
+					return conn.Status.Conditions, err
+				}, corev1alpha1.ConditionReady)
+			},
+		},
+		{
+			// The Secret cannot be hard-deleted while its Connection exists (it
+			// carries a cleanup finalizer); updates stay allowed. It is released
+			// only when the Connection is deleted.
+			name: "Secret survives deletion while its Connection exists, released on Connection delete",
+			step: func(t *testing.T) {
+				secretKey := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "late-secret"}
+				// The Connection reconcile should have stamped the finalizer.
+				require.Eventually(t, func() bool {
+					s := &corev1.Secret{}
+					if err := env.ConsumerClient.Get(ctx, secretKey, s); err != nil {
+						return false
+					}
+					for _, f := range s.Finalizers {
+						if f == corev1alpha1.FinalizerCleanup {
+							return true
+						}
+					}
+					return false
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "Secret should carry the cleanup finalizer")
+
+				// Deleting the Secret must NOT remove it while the Connection lives.
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Namespace: secretKey.Namespace, Name: secretKey.Name},
+				}))
+				require.Never(t, func() bool {
+					s := &corev1.Secret{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, secretKey, s))
+				}, 3*time.Second, 500*time.Millisecond, "Secret must persist (Terminating) while its Connection exists")
+
+				// Deleting the Connection releases the Secret.
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1alpha1.Connection{
+					ObjectMeta: metav1.ObjectMeta{Name: "late-provider"},
+				}))
+				require.Eventually(t, func() bool {
+					s := &corev1.Secret{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, secretKey, s))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "Secret should be released once the Connection is deleted")
+				require.Eventually(t, func() bool {
+					c := &corev1alpha1.Connection{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "late-provider"}, c))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "Connection should finalize")
+			},
+		},
+		{
+			// A Secret shared by multiple Connections keeps its finalizer until
+			// the LAST Connection referencing it is gone.
+			name: "Secret shared by multiple Connections is released only when the last one is deleted",
+			step: func(t *testing.T) {
+				sharedKey := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "shared-secret"}
+				require.NoError(t, env.ConsumerClient.Create(ctx, env.CopyProviderSecret(t, "shared-secret")))
+				for _, name := range []string{"shared-a", "shared-b"} {
+					require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
+						ObjectMeta: metav1.ObjectMeta{Name: name},
+						Spec: corev1alpha1.ConnectionSpec{
+							KubeconfigSecretRef: corev1alpha1.SecretKeyRef{
+								Namespace: framework.KubeBindNamespace, Name: "shared-secret", Key: "kubeconfig",
+							},
+							Schema: corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
+						},
+					}))
+				}
+				for _, name := range []string{"shared-a", "shared-b"} {
+					framework.WaitForConditionTrue(t, func() ([]metav1.Condition, error) {
+						c := &corev1alpha1.Connection{}
+						err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: name}, c)
+						return c.Status.Conditions, err
+					}, corev1alpha1.ConditionReady)
+				}
+
+				// Request deletion of the shared Secret — it must stay (finalizer).
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Namespace: sharedKey.Namespace, Name: sharedKey.Name},
+				}))
+
+				// Delete the first Connection — the Secret must survive (the second
+				// Connection still holds it).
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1alpha1.Connection{
+					ObjectMeta: metav1.ObjectMeta{Name: "shared-a"},
+				}))
+				require.Eventually(t, func() bool {
+					c := &corev1alpha1.Connection{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "shared-a"}, c))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "shared-a should finalize")
+				require.Never(t, func() bool {
+					s := &corev1.Secret{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, sharedKey, s))
+				}, 3*time.Second, 500*time.Millisecond, "shared Secret must survive while shared-b still references it")
+
+				// Delete the second (last) Connection — now the Secret is released
+				// and its pending deletion proceeds.
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1alpha1.Connection{
+					ObjectMeta: metav1.ObjectMeta{Name: "shared-b"},
+				}))
+				require.Eventually(t, func() bool {
+					s := &corev1.Secret{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, sharedKey, s))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "shared Secret should be released after the last Connection is deleted")
+			},
+		},
+		{
+			// Gap 2: deleting the ClusterBinding unbinds — provider copies gone,
+			// pulled CRD removed, consumer instances cascade away, finalizer freed.
+			name: "deleting the ClusterBinding unbinds and cleans up",
+			step: func(t *testing.T) {
+				// Seed a fresh synced instance.
+				_, err := consumerWidgets.Create(ctx, widget("unbind-widget", "small"), metav1.CreateOptions{})
+				require.NoError(t, err)
+				require.Eventually(t, func() bool {
+					_, err := providerWidgets.Get(ctx, "unbind-widget", metav1.GetOptions{})
+					return err == nil
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "unbind-widget should sync to the provider")
+
+				// Unbind.
+				require.NoError(t, env.ConsumerClient.Delete(ctx, &corev1alpha1.ClusterBinding{
+					ObjectMeta: metav1.ObjectMeta{Name: "widgets"},
+				}))
+
+				// ClusterBinding finalizes and disappears.
+				require.Eventually(t, func() bool {
+					cb := &corev1alpha1.ClusterBinding{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "widgets"}, cb))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "ClusterBinding should finalize")
+
+				// Provider copy deleted.
+				require.Eventually(t, func() bool {
+					_, err := providerWidgets.Get(ctx, "unbind-widget", metav1.GetOptions{})
+					return apierrors.IsNotFound(err)
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "provider copy should be cleaned up on unbind")
+
+				// Pulled CRD removed → consumer instances cascade away.
+				require.Eventually(t, func() bool {
+					crd := &apiextensionsv1.CustomResourceDefinition{}
+					return apierrors.IsNotFound(env.ConsumerClient.Get(ctx, client.ObjectKey{Name: widgetCRDName}, crd))
+				}, wait.ForeverTestTimeout, 200*time.Millisecond, "pulled CRD should be removed on unbind")
+			},
+		},
 	} {
 		t.Run(tc.name, tc.step)
 	}
+}
+
+func isConditionTrue(conds []metav1.Condition, t string) bool {
+	for _, c := range conds {
+		if c.Type == t {
+			return c.Status == metav1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func widget(name, size string) *unstructured.Unstructured {

@@ -50,6 +50,12 @@ func ResolveConnection(ctx context.Context, c client.Client, crdName, namespace 
 	}
 	for i := range cbs.Items {
 		cb := &cbs.Items[i]
+		// A binding being deleted is no longer a valid sync source — this gates
+		// the syncer off during unbind so it doesn't re-add finalizers or
+		// re-create provider copies while cleanup runs.
+		if cb.DeletionTimestamp != nil {
+			continue
+		}
 		if listsAPI(cb.Spec.APIs, crdName) {
 			return Resolution{
 				Found:          true,
@@ -66,6 +72,9 @@ func ResolveConnection(ctx context.Context, c client.Client, crdName, namespace 
 		}
 		for i := range bs.Items {
 			b := &bs.Items[i]
+			if b.DeletionTimestamp != nil {
+				continue
+			}
 			if listsAPI(b.Spec.APIs, crdName) {
 				return Resolution{
 					Found:          true,
