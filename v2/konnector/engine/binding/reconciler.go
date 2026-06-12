@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,18 +107,34 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 			notExported = append(notExported, api.Name)
 			continue
 		}
-		hash, _, err := crdpull.Pull(ctx, b.client, providerClient, api.Name, conn.Name, crdpull.Options{
-			Create: conn.Spec.Schema.PullPolicy != corev1alpha1.PullPolicyNone,
-			Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
-		})
-		if err != nil {
-			if apierrors.IsForbidden(err) {
-				apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionPermissionDenied, metav1.ConditionTrue, corev1alpha1.ReasonForbidden,
-					fmt.Sprintf("pulling CRD %q is forbidden by provider RBAC", api.Name)))
-				setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonForbidden, "provider RBAC denies reading the CRD")
-				return nil
+		var hash string
+		if conn.Status.ActiveSchemaSource == corev1alpha1.SchemaSourceOpenAPI {
+			// CRD-less provider: the Connection synthesized + installed the CRD.
+			// The binding just consumes it (no provider apiextensions to read).
+			crd := &apiextensionsv1.CustomResourceDefinition{}
+			if err := b.client.Get(ctx, client.ObjectKey{Name: api.Name}, crd); err != nil {
+				if apierrors.IsNotFound(err) {
+					notExported = append(notExported, api.Name)
+					continue
+				}
+				return fmt.Errorf("getting synthesized CRD %q: %w", api.Name, err)
 			}
-			return fmt.Errorf("pulling CRD %q: %w", api.Name, err)
+			hash = crd.Annotations[crdpull.AnnotationSchemaHash]
+		} else {
+			h, _, err := crdpull.Pull(ctx, b.client, providerClient, api.Name, conn.Name, crdpull.Options{
+				Create: conn.Spec.Schema.PullPolicy != corev1alpha1.PullPolicyNone,
+				Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
+			})
+			if err != nil {
+				if apierrors.IsForbidden(err) {
+					apimeta.SetStatusCondition(&status.Conditions, condition(obj, corev1alpha1.ConditionPermissionDenied, metav1.ConditionTrue, corev1alpha1.ReasonForbidden,
+						fmt.Sprintf("pulling CRD %q is forbidden by provider RBAC", api.Name)))
+					setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonForbidden, "provider RBAC denies reading the CRD")
+					return nil
+				}
+				return fmt.Errorf("pulling CRD %q: %w", api.Name, err)
+			}
+			hash = h
 		}
 		// Count instances we refused to sync due to a foreign provider target.
 		var conflicts int32
@@ -133,6 +150,12 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 		setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonAPINotExported,
 			fmt.Sprintf("APIs not exported by the provider yet: %s", strings.Join(notExported, ", ")))
 		return nil
+	}
+
+	// Sync related Secrets/ConfigMaps in the declared direction, scoped like the
+	// binding.
+	if err := b.reconcileRelated(ctx, obj, namespace, providerClient, conn.Status.LocalClusterUID); err != nil {
+		return fmt.Errorf("syncing related resources: %w", err)
 	}
 
 	var totalConflicts int32

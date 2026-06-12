@@ -81,7 +81,9 @@ func (b *base) cleanup(ctx context.Context, obj corev1alpha1.BindingAccessor, na
 			}
 		}
 	}
-	return nil
+
+	// Delete related Secret/ConfigMap copies this binding created.
+	return b.cleanupRelated(ctx, obj, namespace, providerClient)
 }
 
 // countConflicts counts consumer instances of gvr in scope that the syncer

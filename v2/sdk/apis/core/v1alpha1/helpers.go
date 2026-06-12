@@ -24,6 +24,8 @@ import (
 // BindingAccessor is implemented by both ClusterBinding and Binding so a single
 // reconciler can drive either kind. The only difference between them is scope.
 // It is also a client.Object (metav1.Object + runtime.Object).
+//
+// +kubebuilder:object:generate=false
 type BindingAccessor interface {
 	metav1.Object
 	runtime.Object

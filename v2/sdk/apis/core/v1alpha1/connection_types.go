@@ -144,6 +144,13 @@ type ConnectionStatus struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="localClusterUID is immutable"
 	LocalClusterUID string `json:"localClusterUID,omitempty"`
 
+	// activeSchemaSource is the schema source actually in effect after resolving
+	// "Auto" (CRD or OpenAPI). The binding uses it to decide whether the
+	// Connection already installed the CRDs (OpenAPI) or it should pull them (CRD).
+	//
+	// +optional
+	ActiveSchemaSource SchemaSource `json:"activeSchemaSource,omitempty"`
+
 	// exportedAPIs is the discovery result: APIs exported to these credentials.
 	//
 	// +optional

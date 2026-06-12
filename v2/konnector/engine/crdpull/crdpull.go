@@ -34,9 +34,9 @@ import (
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
 
-// annotationSchemaHash records the hash of the installed schema so updatePolicy
+// AnnotationSchemaHash records the hash of the installed schema so updatePolicy
 // can detect provider changes without re-deriving.
-const annotationSchemaHash = "core.kube-bind.io/schema-hash"
+const AnnotationSchemaHash = "core.kube-bind.io/schema-hash"
 
 // Options control how the CRD is reconciled on the consumer.
 type Options struct {
@@ -57,11 +57,34 @@ func Pull(ctx context.Context, consumer client.Client, provider client.Reader, c
 		return "", false, fmt.Errorf("reading provider CRD: %w", err)
 	}
 	desired := ForConsumer(&remoteCRD, connName)
-	hash = Hash(desired)
-	desired.Annotations[annotationSchemaHash] = hash
+	return install(ctx, consumer, desired, connName, opts)
+}
+
+// Install installs an already-built (e.g. OpenAPI-synthesized) consumer CRD,
+// stamping the managed/connection/schema-hash markers. updatePolicy: Always
+// follows changes; Once pins.
+func Install(ctx context.Context, consumer client.Client, crd *apiextensionsv1.CustomResourceDefinition, connName string, update bool) (hash string, err error) {
+	desired := crd.DeepCopy()
+	if desired.Labels == nil {
+		desired.Labels = map[string]string{}
+	}
+	desired.Labels[corev1alpha1.LabelManaged] = "true"
+	if desired.Annotations == nil {
+		desired.Annotations = map[string]string{}
+	}
+	desired.Annotations[corev1alpha1.AnnotationConnection] = connName
+	h, _, err := install(ctx, consumer, desired, connName, Options{Create: true, Update: update})
+	return h, err
+}
+
+// install reconciles a fully-built consumer CRD (create-if-absent, update on
+// schema change per opts.Update, stamp-only when opts.Create is false).
+func install(ctx context.Context, consumer client.Client, desired *apiextensionsv1.CustomResourceDefinition, connName string, opts Options) (string, bool, error) {
+	hash := Hash(desired)
+	desired.Annotations[AnnotationSchemaHash] = hash
 
 	var existing apiextensionsv1.CustomResourceDefinition
-	getErr := consumer.Get(ctx, client.ObjectKey{Name: crdName}, &existing)
+	getErr := consumer.Get(ctx, client.ObjectKey{Name: desired.Name}, &existing)
 	switch {
 	case apierrors.IsNotFound(getErr):
 		if !opts.Create {
@@ -85,12 +108,12 @@ func Pull(ctx context.Context, consumer client.Client, provider client.Reader, c
 			}
 			return hash, true, nil
 		}
-		if opts.Update && existing.Annotations[annotationSchemaHash] != hash {
+		if opts.Update && existing.Annotations[AnnotationSchemaHash] != hash {
 			existing.Spec = desired.Spec
 			if existing.Annotations == nil {
 				existing.Annotations = map[string]string{}
 			}
-			existing.Annotations[annotationSchemaHash] = hash
+			existing.Annotations[AnnotationSchemaHash] = hash
 			existing.Annotations[corev1alpha1.AnnotationConnection] = connName
 			if existing.Labels == nil {
 				existing.Labels = map[string]string{}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -94,6 +95,38 @@ func TestSlimCoreHappyCase(t *testing.T) {
 				require.NotEmpty(t, conn.Status.LocalClusterUID, "local cluster UID must be pinned")
 				_, ok := conn.Status.ExportsAPI(widgetCRDName)
 				require.True(t, ok, "Connection must export %s", widgetCRDName)
+			},
+		},
+		{
+			name: "provider heartbeat Lease is maintained and renewed",
+			step: func(t *testing.T) {
+				leaseFor := func() (*coordinationv1.Lease, bool) {
+					conn := &corev1alpha1.Connection{}
+					if err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "demo-provider"}, conn); err != nil || conn.Status.LocalClusterUID == "" {
+						return nil, false
+					}
+					l := &coordinationv1.Lease{}
+					key := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "consumer-" + conn.Status.LocalClusterUID}
+					if err := env.ProviderClient.Get(ctx, key, l); err != nil {
+						return nil, false
+					}
+					return l, l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity == conn.Status.LocalClusterUID
+				}
+
+				var renew1 metav1.MicroTime
+				require.Eventually(t, func() bool {
+					l, ok := leaseFor()
+					if !ok || l.Labels[corev1alpha1.LabelManaged] != "true" || l.Spec.RenewTime == nil {
+						return false
+					}
+					renew1 = *l.Spec.RenewTime
+					return true
+				}, 30*time.Second, 200*time.Millisecond, "a heartbeat Lease should appear on the provider")
+
+				require.Eventually(t, func() bool {
+					l, ok := leaseFor()
+					return ok && l.Spec.RenewTime != nil && l.Spec.RenewTime.After(renew1.Time)
+				}, 30*time.Second, 200*time.Millisecond, "the heartbeat Lease should be renewed")
 			},
 		},
 		{

@@ -43,6 +43,14 @@ v2/
   Always`/`Once`, and `autoBind` (a managed ClusterBinding mirroring exported
   APIs). `deletion-policy: Orphan` keeps a provider copy on delete/unbind.
   Provider RBAC denials surface as a `PermissionDenied` condition / Event.
+- `schema.source: OpenAPI` (and `Auto`) synthesizes the consumer CRD from the
+  provider's discovery + `/openapi/v3` — the CRD-less (kcp-like) path — and the
+  Connection installs it. Known fidelity limits (CEL, defaulting, `$ref`,
+  multi-version) are accepted; the provider stays the enforcing side.
+- The konnector maintains a `coordination.k8s.io/Lease` per Connection on the
+  provider (heartbeat) — the hook a service-layer reaper keys off.
+- `relatedResources` sync selected Secrets/ConfigMaps in the declared direction,
+  scoped like the binding, GC'd when they stop matching or on unbind.
 - The provider side is the **multicluster-runtime engaged cluster** for each
   Connection: writes go through its client, fresh reads through its API reader,
   and status/drift events arrive via a **watch on its cache** (event-driven, not
@@ -57,9 +65,11 @@ v2/
   gone, and keeps its Secret alive (via a finalizer) so teardown can still reach
   the provider — so `kubectl delete -f bundle.yaml` is order-don't-care.
 
-Known POC simplifications (tracked against the proposal): `schema.source:
-OpenAPI` (the kcp/CRD-less path), related resources, the `Mapper` extension,
-and the provider `Lease` are not implemented yet.
+Known POC simplifications (tracked against the proposal): the `Mapper`
+extension is not implemented; OpenAPI synthesis is best-effort (fidelity limits
+above); cluster identity still derives from the `kube-system` namespace UID, so
+true kcp logical clusters (no kube-system) need an alternative identity source;
+and syncer stop-on-disengage + productionization (RBAC/HA/Helm) remain.
 
 ## Build
 

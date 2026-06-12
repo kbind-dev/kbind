@@ -40,6 +40,11 @@ const (
 	// synced provider object (ownership marker).
 	AnnotationConsumerObjectUID = "core.kube-bind.io/consumer-object-uid"
 
+	// AnnotationRelatedBinding records, on a synced related Secret/ConfigMap, the
+	// UID of the binding that pulled it in, so it can be GC'd when it stops
+	// matching the selector or the binding is removed.
+	AnnotationRelatedBinding = "core.kube-bind.io/related-binding"
+
 	// AnnotationConflict marks a consumer instance the konnector refused to sync
 	// because the provider target is owned by another binding/consumer. The
 	// value is the conflict reason. Bindings count annotated instances to report

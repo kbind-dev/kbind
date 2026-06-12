@@ -25,6 +25,7 @@ import (
 	"sort"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -39,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/crdpull"
+	"github.com/kube-bind/kube-bind/v2/konnector/engine/openapi"
 	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
 	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
 )
@@ -56,6 +59,21 @@ type Reconciler struct {
 	// DiscoveryResync is how often a Ready Connection re-discovers exported APIs
 	// (so a CRD labeled exported after connect is picked up). 0 = default 30s.
 	DiscoveryResync time.Duration
+	// LeaseNamespace is the provider namespace where the konnector maintains its
+	// heartbeat Lease. 0 = default "kube-bind".
+	LeaseNamespace string
+}
+
+const (
+	leaseNamespaceDefault = "kube-bind"
+	leaseDurationSeconds  = 60
+)
+
+func (r *Reconciler) leaseNamespace() string {
+	if r.LeaseNamespace != "" {
+		return r.LeaseNamespace
+	}
+	return leaseNamespaceDefault
 }
 
 func (r *Reconciler) discoveryResync() time.Duration {
@@ -182,14 +200,15 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 	}
 	setCondition(conn, corev1alpha1.ConditionConnected, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "connected to provider")
 
-	// 3. Discover exported APIs (schema.source: CRD — label-gated).
-	exported, err := discoverExportedCRDs(ctx, providerClient)
+	// 3. Discover exported APIs and install schemas, per schema.source.
+	source, exported, err := r.discoverAndInstall(ctx, conn, providerClient)
 	if err != nil {
 		if apierrors.IsForbidden(err) {
-			return r.denyPermission(conn, "listing exported CRDs is forbidden by RBAC: "+err.Error())
+			return r.denyPermission(conn, "discovery is forbidden by provider RBAC: "+err.Error())
 		}
 		return fmt.Errorf("discovering exported APIs: %w", err)
 	}
+	conn.Status.ActiveSchemaSource = source
 	conn.Status.ExportedAPIs = exported
 	setCondition(conn, corev1alpha1.ConditionPermissionDenied, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no RBAC denials")
 
@@ -214,8 +233,56 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 		}
 	}
 
+	// Heartbeat: maintain a Lease on the provider so a service-layer reaper can
+	// detect a consumer that stopped checking in. Best-effort — a missing Lease
+	// never blocks sync.
+	if err := r.heartbeat(ctx, providerClient, conn); err != nil {
+		ctrl.LoggerFrom(ctx).V(2).Info("heartbeat lease update failed (continuing)", "err", err.Error())
+	}
+
 	setCondition(conn, corev1alpha1.ConditionReady, metav1.ConditionTrue, corev1alpha1.ReasonAsExpected, "connection ready")
 	return nil
+}
+
+// heartbeat creates or renews a coordination.k8s.io/Lease on the provider in the
+// designated namespace, keyed by the consumer cluster identity. Zero kube-bind
+// CRDs on the provider — just a plain Lease.
+func (r *Reconciler) heartbeat(ctx context.Context, providerClient client.Client, conn *corev1alpha1.Connection) error {
+	if conn.Status.LocalClusterUID == "" {
+		return nil
+	}
+	ns := r.leaseNamespace()
+	if err := providerClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil &&
+		!apierrors.IsAlreadyExists(err) && !apierrors.IsForbidden(err) {
+		return fmt.Errorf("ensuring lease namespace: %w", err)
+	}
+
+	now := metav1.NowMicro()
+	lease := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: leaseName(conn), Namespace: ns}}
+	_, err := controllerutil.CreateOrUpdate(ctx, providerClient, lease, func() error {
+		if lease.Labels == nil {
+			lease.Labels = map[string]string{}
+		}
+		lease.Labels[corev1alpha1.LabelManaged] = "true"
+		if lease.Annotations == nil {
+			lease.Annotations = map[string]string{}
+		}
+		lease.Annotations[corev1alpha1.AnnotationConsumerClusterUID] = conn.Status.LocalClusterUID
+		lease.Spec.HolderIdentity = ptr.To(conn.Status.LocalClusterUID)
+		lease.Spec.LeaseDurationSeconds = ptr.To(int32(leaseDurationSeconds))
+		if lease.Spec.AcquireTime == nil {
+			lease.Spec.AcquireTime = &now
+		}
+		lease.Spec.RenewTime = &now
+		return nil
+	})
+	return err
+}
+
+// leaseName keys the heartbeat Lease by the consumer cluster identity, so a
+// provider can track which consumers are alive.
+func leaseName(conn *corev1alpha1.Connection) string {
+	return "consumer-" + conn.Status.LocalClusterUID
 }
 
 // reconcileAutoBind keeps a managed ClusterBinding named after the Connection in
@@ -375,6 +442,54 @@ func (r *Reconciler) bindingsReferencing(ctx context.Context, name string) (int,
 
 // discoverExportedCRDs lists provider CRDs carrying the exported label and maps
 // them to ExportedAPI entries.
+// discoverAndInstall resolves the schema source and returns the active source +
+// exported APIs. For CRD it lists label-gated provider CRDs (the binding pulls
+// them later); for OpenAPI it synthesizes CRDs from discovery + /openapi/v3 and
+// installs them on the consumer (CRD-less providers like kcp). Auto probes CRD
+// first and falls back to OpenAPI.
+func (r *Reconciler) discoverAndInstall(ctx context.Context, conn *corev1alpha1.Connection, providerClient client.Client) (corev1alpha1.SchemaSource, []corev1alpha1.ExportedAPI, error) {
+	src := conn.Spec.Schema.Source
+	if src == "" {
+		src = corev1alpha1.SchemaSourceAuto
+	}
+
+	if src == corev1alpha1.SchemaSourceCRD || src == corev1alpha1.SchemaSourceAuto {
+		exported, err := discoverExportedCRDs(ctx, providerClient)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(exported) > 0 || src == corev1alpha1.SchemaSourceCRD {
+			return corev1alpha1.SchemaSourceCRD, exported, nil
+		}
+		// Auto with no labeled CRDs → fall through to OpenAPI.
+	}
+
+	// OpenAPI: synthesize CRDs from discovery + /openapi/v3 and install them.
+	cfg, err := remote.RestConfigFromConnection(ctx, r.Client, conn)
+	if err != nil {
+		return "", nil, err
+	}
+	crds, err := openapi.SynthesizeCRDs(ctx, cfg)
+	if err != nil {
+		return "", nil, err
+	}
+	exported := make([]corev1alpha1.ExportedAPI, 0, len(crds))
+	for _, crd := range crds {
+		if _, err := crdpull.Install(ctx, r.Client, crd, conn.Name, conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce); err != nil {
+			return "", nil, fmt.Errorf("installing synthesized CRD %q: %w", crd.Name, err)
+		}
+		exported = append(exported, corev1alpha1.ExportedAPI{
+			Name:     crd.Name,
+			Group:    crd.Spec.Group,
+			Resource: crd.Spec.Names.Plural,
+			Scope:    crd.Spec.Scope,
+			Versions: []string{crd.Spec.Versions[0].Name},
+		})
+	}
+	sort.Slice(exported, func(i, j int) bool { return exported[i].Name < exported[j].Name })
+	return corev1alpha1.SchemaSourceOpenAPI, exported, nil
+}
+
 func discoverExportedCRDs(ctx context.Context, providerClient client.Client) ([]corev1alpha1.ExportedAPI, error) {
 	var crds apiextensionsv1.CustomResourceDefinitionList
 	if err := providerClient.List(ctx, &crds, client.MatchingLabels{corev1alpha1.LabelExported: "true"}); err != nil {

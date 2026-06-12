@@ -129,6 +129,12 @@ spec:
           status:
             description: ConnectionStatus is the observed state of a Connection.
             properties:
+              activeSchemaSource:
+                description: |-
+                  activeSchemaSource is the schema source actually in effect after resolving
+                  "Auto" (CRD or OpenAPI). The binding uses it to decide whether the
+                  Connection already installed the CRDs (OpenAPI) or it should pull them (CRD).
+                type: string
               conditions:
                 description: 'conditions: SecretValid, Connected, SchemaInSync, Ready.'
                 items:
