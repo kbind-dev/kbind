@@ -37,6 +37,12 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  v2-test:
+    name: v2-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
   lint:
     name: lint
     runs-on: ubuntu-latest

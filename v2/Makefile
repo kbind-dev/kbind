@@ -57,9 +57,11 @@ codegen:
 ENVTEST_K8S_VERSION ?= 1.34.1
 SETUP_ENVTEST ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.21
 
+# Unit tests only. The envtest-based e2e (which needs KUBEBUILDER_ASSETS) is a
+# separate target so `make test` runs with no external setup.
 .PHONY: test
 test:
-	cd konnector && go test ./...
+	cd konnector && go test $$(go list ./... | grep -v /test/e2e)
 	cd sdk && go test ./...
 
 # Run the envtest-based e2e (two in-process API servers + the engine).
