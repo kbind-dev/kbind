@@ -108,3 +108,19 @@ jobs:
         go-version: v1.26.2
     - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
     - run: make image-local
+
+  # Verify the v2 konnector image builds for all release architectures, without
+  # pushing. Mirrors the v2 release workflow's multi-arch buildx invocation.
+  v2-image-build:
+    name: v2-image-build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+    - name: Build v2 konnector image (multi-arch, no push)
+      run: |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --file v2/konnector/Dockerfile \
+          --provenance=false \
+          v2

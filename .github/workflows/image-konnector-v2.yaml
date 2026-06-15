@@ -1,0 +1,64 @@
+name: Image konnector v2
+
+# Publishes the v2 slim-core konnector image. Triggered ONLY by tags in the
+# `konnector/v2*` namespace (e.g. `konnector/v2.0.0`), which deliberately do not
+# match the `v*` tag filter the v1 image/goreleaser/CI workflows use — so this is
+# fully independent of the existing v1 release infrastructure.
+#
+# The image is pushed to the shared `konnector` package under a v2 tag (the part
+# after `konnector/`), e.g. ghcr.io/<owner>/konnector:v2.0.0. It is NOT tagged
+# `latest`: v1 and v2 are distinct builds and `latest` stays with v1.
+on:
+  push:
+    tags:
+    - 'konnector/v2*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - name: Compute image ref
+      id: meta
+      run: |
+        # refs/tags/konnector/v2.0.0 -> GITHUB_REF_NAME=konnector/v2.0.0 -> version=v2.0.0
+        version="${GITHUB_REF_NAME#konnector/}"
+        owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+        {
+          echo "version=${version}"
+          echo "image=ghcr.io/${owner}/konnector"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Multi-arch via in-Dockerfile cross-compile (builder is pinned to
+    # BUILDPLATFORM), so no QEMU is required. Build context is v2/ so the
+    # konnector module's `replace ../sdk` resolves. No :latest tag.
+    - name: Build and push v2 konnector image
+      run: |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --file v2/konnector/Dockerfile \
+          --tag "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}" \
+          --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+          --label "org.opencontainers.image.revision=${{ github.sha }}" \
+          --label "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
+          --label "org.opencontainers.image.title=konnector" \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --provenance=false \
+          --push \
+          v2

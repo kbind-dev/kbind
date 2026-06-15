@@ -20,7 +20,9 @@
 #   docker build -f konnector/Dockerfile -t kube-bind/konnector:dev .
 #
 # from inside v2/.
-FROM golang:1.26.2 AS builder
+# Pin the builder to the build host's native platform and cross-compile via
+# GOARCH/GOOS (CGO disabled), so multi-arch builds need no QEMU emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26.2 AS builder
 WORKDIR /workspace
 
 ARG TARGETARCH
