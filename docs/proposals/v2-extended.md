@@ -3,7 +3,7 @@
 * Status: **DRAFT — for iteration**
 * Authors: @mjudeikis
 * Date: 2026-06-10
-* Builds on: [v2-slim-core.md](v2-slim-core.md) (Proposed))
+* Builds on: [v2-slim-core.md](v2-slim-core.md) (Proposed)
 
 ## Summary
 

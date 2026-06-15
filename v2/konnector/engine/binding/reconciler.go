@@ -98,8 +98,9 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 	}
 
 	var (
-		boundAPIs   []corev1alpha1.BoundAPI
-		notExported []string
+		boundAPIs     []corev1alpha1.BoundAPI
+		notExported   []string
+		pendingSchema []string
 	)
 	for _, api := range spec.APIs {
 		exported, ok := conn.Status.ExportsAPI(api.Name)
@@ -114,7 +115,9 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 			crd := &apiextensionsv1.CustomResourceDefinition{}
 			if err := b.client.Get(ctx, client.ObjectKey{Name: api.Name}, crd); err != nil {
 				if apierrors.IsNotFound(err) {
-					notExported = append(notExported, api.Name)
+					// The API is exported, but the Connection has not installed the
+					// synthesized CRD yet — a transient wait, not "not exported".
+					pendingSchema = append(pendingSchema, api.Name)
 					continue
 				}
 				return fmt.Errorf("getting synthesized CRD %q: %w", api.Name, err)
@@ -149,6 +152,11 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 	if len(notExported) > 0 {
 		setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonAPINotExported,
 			fmt.Sprintf("APIs not exported by the provider yet: %s", strings.Join(notExported, ", ")))
+		return nil
+	}
+	if len(pendingSchema) > 0 {
+		setReady(status, obj, metav1.ConditionFalse, corev1alpha1.ReasonPending,
+			fmt.Sprintf("waiting for the Connection to install the synthesized CRD(s): %s", strings.Join(pendingSchema, ", ")))
 		return nil
 	}
 

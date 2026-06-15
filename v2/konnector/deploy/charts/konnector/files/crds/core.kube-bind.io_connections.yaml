@@ -238,8 +238,8 @@ spec:
                   connect and immutable thereafter.
                 type: string
                 x-kubernetes-validations:
-                - message: localClusterUID is immutable
-                  rule: self == oldSelf
+                - message: localClusterUID is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
               remoteClusterUID:
                 description: |-
                   remoteClusterUID is the identity of the provider cluster, pinned on first
@@ -247,8 +247,8 @@ spec:
                   cluster is rejected rather than silently re-homing synced objects.
                 type: string
                 x-kubernetes-validations:
-                - message: remoteClusterUID is immutable
-                  rule: self == oldSelf
+                - message: remoteClusterUID is immutable once set
+                  rule: oldSelf == '' || self == oldSelf
             type: object
         required:
         - spec

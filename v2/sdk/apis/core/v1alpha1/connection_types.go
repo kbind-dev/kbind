@@ -134,14 +134,14 @@ type ConnectionStatus struct {
 	// cluster is rejected rather than silently re-homing synced objects.
 	//
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="remoteClusterUID is immutable"
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="remoteClusterUID is immutable once set"
 	RemoteClusterUID string `json:"remoteClusterUID,omitempty"`
 
 	// localClusterUID is the identity of the consumer cluster, pinned on first
 	// connect and immutable thereafter.
 	//
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="localClusterUID is immutable"
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="localClusterUID is immutable once set"
 	LocalClusterUID string `json:"localClusterUID,omitempty"`
 
 	// activeSchemaSource is the schema source actually in effect after resolving
