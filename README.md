@@ -1,83 +1,147 @@
-<img alt="Logo" width="196px" style="margin-right: 30px;" align="left" src="./docs/images/logo.png"></img>
+# kbind — slim core (POC)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/kube-bind/kube-bind)](https://goreportcard.com/report/github.com/kube-bind/kube-bind)
-[![GitHub](https://img.shields.io/github/license/kube-bind/kube-bind)](https://github.com/kube-bind/kube-bind/blob/main/LICENSE)
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/kube-bind/kube-bind?sort=semver)](https://github.com/kube-bind/kube-bind/releases/latest)
+The kbind "slim core": a consumer-side sync engine (the konnector) that binds
+APIs exported by a provider cluster into a consumer cluster. See
+[docs/proposals/v2-slim-core.md](docs/proposals/v2-slim-core.md) for the design.
 
-# kube-bind
+## Layout
 
-You are invited to [contribute](#contributing)!
-
-## What is it?
-
-kube-bind provides better support for service providers and consumers that reside in distinct Kubernetes clusters.
-
-- A service provider defines its API in terms of CRDs and associated permission claims/limitations, and exports it for use from other clusters.
-- Service consumers identify the services they want to consume.
-- The service CRDs get installed in the service consumer clusters, with objects of the defined kinds written and read by the service consumers.
-- The service provider indirectly reads and writes those objects as the interface to the service that it provides.
-- The service provider does not inject controllers/operators into the service consumer's cluster.
-- A single vendor-neutral, OpenSource agent per consumer cluster connects it with the requested services.
-
-## Try it out
-
-This is the 3 line pitch:
-
-```shell
-$ kubectl krew index add bind https://github.com/kube-bind/krew-index.git
-$ kubectl krew install bind/bind
-$ kubectl bind login https://mangodb
-$ kubectl bind
-Redirect to the browser to authenticate via OIDC.
-BOOM – the MangoDB API is available in the local cluster,
-       without anything MangoDB-specific running.
-$ kubectl get mangodbs
+```
+.                          # module: github.com/kbind/kbind (the konnector)
+├── go.work                # ties the two modules for local dev
+├── cmd/konnector/         # main: local mgr + mcmanager + reconcilers
+├── engine/
+│   ├── provider/          # mcr provider: Connection -> engaged cluster
+│   ├── connection/        # resolve secret, pin identity, discover exports
+│   ├── binding/           # validate + pull CRDs (schema.source: CRD)
+│   ├── sync/              # per-GVR spec-up / status-down + conflicts
+│   └── remote/            # kubeconfig + cluster identity helpers
+├── test/e2e/              # two-envtest end-to-end suite
+├── deploy/charts/konnector/  # Helm chart (CRDs, RBAC, Deployment)
+├── sdk/                   # module: github.com/kbind/kbind/sdk (type-only API)
+│   ├── apis/core/v1alpha1/    #   Connection, ClusterBinding, Binding (core.kbind.io)
+│   └── config/crd/            #   generated CRD manifests
+└── hack/demo.sh           # two-kind-cluster end-to-end demo
 ```
 
-## For more information
+## What works today (POC milestone: E2E single-API sync)
 
-For more information go to https://kube-bind.io or watch the [ContainerDays talk](https://www.youtube.com/watch?v=dg0g15Qv5Fo&t=1s)
-or the [KubeCon talk](https://www.youtube.com/watch?v=Uv0ivz5xej4).
+- `Connection` resolves a kubeconfig Secret, pins provider/consumer cluster
+  identity, and discovers label-gated exported CRDs into `status.exportedAPIs`.
+- `ClusterBinding` / `Binding` validate the connection, pull the listed CRDs
+  (`schema.source: CRD`, single served version, no conversion webhook) onto the
+  consumer, and report `Ready` + `boundAPIs`.
+- A dynamic per-GVR syncer copies instance **spec up** (server-side apply with
+  ownership markers + a finalizer) and **status down**. `conflictPolicy: Fail`
+  refuses a foreign provider target (Event + conflict annotation, counted on the
+  binding's `conflictCount` + `Conflicts` condition); `conflictPolicy: Adopt`
+  takes over an *un-owned* provider object (never one owned by another binding).
+- The Connection **re-discovers** exported APIs periodically, so a CRD labeled
+  `exported` after connect is picked up and its binding goes Ready.
+- Schema knobs are honored: `pullPolicy: Bound`/`All`/`None`, `updatePolicy:
+  Always`/`Once`, and `autoBind` (a managed ClusterBinding mirroring exported
+  APIs). `deletion-policy: Orphan` keeps a provider copy on delete/unbind.
+  Provider RBAC denials surface as a `PermissionDenied` condition / Event.
+- `schema.source: OpenAPI` (and `Auto`) synthesizes the consumer CRD from the
+  provider's discovery + `/openapi/v3` — the CRD-less (kcp-like) path — and the
+  Connection installs it. Known fidelity limits (CEL, defaulting, `$ref`,
+  multi-version) are accepted; the provider stays the enforcing side.
+- The konnector maintains a `coordination.k8s.io/Lease` per Connection on the
+  provider (heartbeat) — the hook a service-layer reaper keys off.
+- **kcp-aware cluster identity**: the provider's stable identity is the kcp
+  `LogicalCluster` ("cluster") UID when present (a kcp workspace serves
+  `core.kcp.io`, and has no `kube-system`), falling back to the `kube-system`
+  namespace UID on plain Kubernetes. A provider RBAC denial on the identity read
+  surfaces as `PermissionDenied`.
+- `relatedResources` sync selected Secrets/ConfigMaps in the declared direction,
+  scoped like the binding, GC'd when they stop matching or on unbind.
+- The provider side is the **multicluster-runtime engaged cluster** for each
+  Connection: writes go through its client, fresh reads through its API reader,
+  and status/drift events arrive via a **watch on its cache** (event-driven, not
+  polled — a low-frequency resync is only a backstop).
+- **Stop-on-disengage**: a Connection that loses readiness (revoked credential,
+  unreachable provider, withdrawn RBAC) is disengaged, and its per-GVR syncers
+  are torn down rather than left running against a dead cluster. When it becomes
+  Ready again the provider re-engages as a fresh cluster and the syncers are
+  rebuilt against it (a stale syncer would otherwise hold a dead client forever).
+- **Mapper extension point** (`engine/mapper`): the syncer routes every
+  provider-side operation through a `Mapper` that translates the consumer object
+  key to its provider key. Core ships only `Identity` (ns/name unchanged); an
+  out-of-tree build supplies its own via `sync.WithMapper(...)` to restore v1's
+  "Prefixed" key isolation without forking the engine. The interface maps keys
+  only — it cannot change scope (cluster-scoped stays cluster-scoped), and it is
+  deliberately kept out of the CRD API so the core API never promises renaming.
+- **Order-independent apply**: a `Connection` created before its Secret resolves
+  when the Secret arrives (the konnector watches referenced Secrets); a binding
+  created before its Connection resolves when the Connection goes Ready.
+- **Complete unbind**: `Connection` and bindings carry a cleanup finalizer.
+  Deleting a `ClusterBinding` deletes the provider copies of synced instances,
+  releases instance finalizers, and removes the pulled CRD (cascading the
+  instances). A `Connection` blocks (`DrainingBindings`) until its bindings are
+  gone, and keeps its Secret alive (via a finalizer) so teardown can still reach
+  the provider — so `kubectl delete -f bundle.yaml` is order-don't-care.
 
-kube-bind is following this manifesto from the linked talk:
+Known POC simplifications (tracked against the proposal): OpenAPI synthesis is
+best-effort (fidelity limits above); the `Mapper` seam exists but only `Identity`
+ships and `relatedResources` are not yet routed through it.
 
-![kube-bind manifesto](docs/images/manifesto.png)
+## Build
 
-## Contributing
+```sh
+make build            # builds both modules (workspace mode via go.work)
+make konnector        # builds the konnector binary into ./bin
+```
 
-We ❤️ our contributors! If you're interested in helping us out, please check out
-[Contributing to kube-bind](./CONTRIBUTING.md) and [kube-bind Project Governance](./GOVERNANCE.md).
+## Deploy
 
-## Getting in touch
+The konnector runs in (or against) the **consumer** cluster — it is the only
+running component of the core (no backend, no provider-side controllers).
 
-There are several ways to communicate with us:
+```sh
+make image IMAGE=ghcr.io/kbind/konnector:dev          # build the image
+helm install konnector deploy/charts/konnector \
+  -n kbind --create-namespace \
+  --set image.repository=ghcr.io/kbind/konnector --set image.tag=dev
+```
 
-- The [`#kube-bind` channel](https://kubernetes.slack.com/archives/C046PRXNJ4W) in the [Kubernetes Slack workspace](https://slack.k8s.io)
-- Our mailing list [kube-bind-dev](https://groups.google.com/g/kube-bind-dev) for development discussions.
-- Our bi-weekly community meetings — every second Thursday at 11am EST (5pm CET).
-    - By joining the [kube-bind-dev mailing list](https://groups.google.com/g/kube-bind-dev), you should receive an invite.
-    - See our [community meeting notes document](https://docs.google.com/document/d/1qztpKOmdZu5iWq_4N9n3AZpcAPuPhBiGNbje5GPg0iM) for upcoming and past agendas.
-    <!-- TODO(community-call-advertise): once the CNCF community page is registered, add: -->
-    <!--   - The next community meeting dates are also available via our [CNCF community group](https://community.cncf.io/kube-bind/). -->
-    <!-- TODO(community-call-advertise): once a YouTube channel is set up, add: -->
-    <!--   - See recordings of past community meetings on [YouTube](TODO-youtube-url). -->
+The chart ([deploy/charts/konnector](deploy/charts/konnector)) ships the core
+CRDs (`installCRDs`, default on), a `ServiceAccount`, the consumer RBAC
+(`ClusterRole`/`ClusterRoleBinding` + a namespaced leader-election `Role`), and
+the `Deployment` with liveness/readiness probes. Notable values:
 
-See the [community page](https://docs.kube-bind.io/main/community) for more details.
+- `replicaCount` / `leaderElect` — HA. Leader election gates all consumer-side
+  controllers, so standby replicas engage no providers until they win the lease.
+  It is forced on automatically when `replicaCount > 1`.
+- `rbac.boundResourceGroups` (default `["*"]`) — the API groups the konnector may
+  sync. The bound APIs are open-ended, so this defaults to all groups; narrow it
+  to the specific groups your providers export to shrink the blast radius.
 
-## Technical Overview
+Provider credentials are governed by the kubeconfig in each `Connection`'s
+Secret, **not** the konnector's ServiceAccount — the RBAC above is consumer-side
+only.
 
-<img alt="overview" width="800px" src="./docs/images/overview.png"></img>
+## Codegen (after editing types)
 
-All the actions shown between the clusters are done by the konnector, except: the pull at the start is done by the kubectl plugin that installs the konnector.
+```sh
+make codegen          # regenerates deepcopy + CRDs under sdk/
+make helm-sync-crds   # codegen + refresh the chart's bundled CRDs
+```
 
-## Usage
+## Tests
 
-To get familiar with setting up the environment, please check out docs at [kube-bind.io](https://docs.kube-bind.io/main/setup).
+The end-to-end test ([test/e2e](test/e2e)) runs two in-process **envtest** API
+servers (provider + consumer) with the real engine reconcilers: Connection Ready
++ discovery → ClusterBinding Ready + CRD pull → spec up → status down → spec
+update → conflict (foreign object not overwritten) → deletion.
 
-### Limitations
+```sh
+make test             # unit tests (no external setup)
+make test-e2e         # downloads envtest assets and runs the e2e suite
+```
 
-These limitations are part of the roadmap and will be addressed in the future.
+## Run the demo (two kind clusters)
 
-* Currently we don't support related resources, like ConfigMaps, Secrets.
-* We don't support lifecycle of `BoundSchema` resources, like schema changes.
-* The backend currently does not support running with replicas > 1 due to missing external session storage implementation. Session storage is currently in-memory only, which prevents proper session sharing across multiple backend instances.
+```sh
+make demo             # creates two kind clusters and wires the bundle
+# then follow the printed instructions to run the konnector and sync a Widget
+```

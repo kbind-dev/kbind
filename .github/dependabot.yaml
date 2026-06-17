@@ -8,3 +8,13 @@ updates:
   groups:
     all-github-actions:
       patterns: [ "*" ]
+# Go modules: root (konnector) and the sdk module.
+- package-ecosystem: "gomod"
+  directories:
+    - "/"
+    - "/sdk"
+  schedule:
+    interval: "weekly"
+  groups:
+    all-gomod:
+      patterns: [ "*" ]

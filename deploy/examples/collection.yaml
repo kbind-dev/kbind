@@ -1,8 +1,0 @@
-apiVersion: kube-bind.io/v1alpha2
-kind: Collection
-metadata:
-  name: all
-spec:
-  templates:
-  - name: cowboys
-  - name: sheriffs

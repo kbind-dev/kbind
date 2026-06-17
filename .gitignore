@@ -23,3 +23,6 @@ web/.vite/
 web/*.tsbuildinfo
 go.work
 go.work.sum
+
+# Local Claude Code project settings
+.claude/

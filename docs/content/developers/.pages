@@ -1,8 +1,0 @@
-nav:
-  - index.md
-  - Architecture: architecture.md
-  - Development Environments: dev-environment
-  - Backend: backend
-  - Konnector: konnector
-  - Publishing a release: publishing-a-release.md
-  - Testing changes: testing-changes.md

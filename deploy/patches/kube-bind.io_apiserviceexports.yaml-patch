@@ -1,5 +1,0 @@
-# schema's Convert functions directly, but the CRD still needs to define a conversion.
-- op: add
-  path: /spec/conversion
-  value:
-    strategy: None

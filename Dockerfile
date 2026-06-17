@@ -1,4 +1,4 @@
-# Copyright 2022 The Kube Bind Authors.
+# Copyright 2026 The Kube Bind Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,64 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Use node:lts-alpine for better compatibility and smaller size
-FROM node:22-alpine AS ui-build-env
-WORKDIR /app
+# konnector image. Build context is the repo root; the root module is the
+# konnector and pulls in the sibling sdk module via
+# `replace github.com/kbind/kbind/sdk => ./sdk`:
+#
+#   docker build -t kbind/konnector:dev .
+#
+# Pin the builder to the build host's native platform and cross-compile via
+# GOARCH/GOOS (CGO disabled), so multi-arch builds need no QEMU emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26.2 AS builder
+WORKDIR /workspace
 
-# Install build dependencies needed for native modules
-RUN apk add --no-cache python3 make g++
-
-# Copy package files
-COPY ./web/package*.json ./
-COPY ./web/.npmrc ./
-
-RUN npm ci
-
-# Copy the Vue app files
-COPY ./web .
-
-# Set environment to avoid native dependency issues
-ENV NODE_ENV=production
-ENV VITE_BUILD_TARGET=docker
-
-# Building UI with Docker-specific config
-RUN npm run build
-
-# Build Go binary with embedded UI assets
-FROM golang:1.26.2 AS go-build-env
-WORKDIR /app
-
-# Accept build arguments for multi-arch support
 ARG TARGETARCH
 ARG TARGETOS
 ARG LDFLAGS
 
-RUN apt-get update && apt-get install -y make jq
+# Build standalone (GOWORK=off) so the image does not depend on go.work. The sdk
+# module must be present for the local replace before `go mod download`.
+ENV GOWORK=off
+COPY go.mod go.sum ./
+COPY sdk/ sdk/
+RUN go mod download
 
-# Copy go.mod and go.sum files first for better caching
-COPY go.mod .
-COPY go.sum .
+COPY cmd/ cmd/
+COPY engine/ engine/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /bin/konnector ./cmd/konnector
 
-# Copy the source code
-COPY . .
-
-# Copy built UI assets for embedding
-COPY --from=ui-build-env /app/dist ./backend/static/web/dist
-
-# Build with embedded assets
-RUN if [ -n "$LDFLAGS" ]; then \
-        echo "Building with LDFLAGS: $LDFLAGS for $TARGETOS/$TARGETARCH"; \
-        CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="$LDFLAGS" -o bin/backend ./cmd/backend; \
-    else \
-        CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH make build; \
-    fi
-
-FROM alpine:3.22.1
-RUN apk --update add ca-certificates
-
-COPY --from=go-build-env /app/bin/backend /bin
-COPY --from=ui-build-env /app/dist /www
-
-
-
-ENTRYPOINT ["/bin/backend"]
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /bin/konnector /bin/konnector
+USER 65532:65532
+ENTRYPOINT ["/bin/konnector"]

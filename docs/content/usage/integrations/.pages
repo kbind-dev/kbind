@@ -1,6 +1,0 @@
-nav:
-    - index.md
-    - cert-manager.md
-    - crossplane.md
-    - cloudnativepg.md
-    - kro.md

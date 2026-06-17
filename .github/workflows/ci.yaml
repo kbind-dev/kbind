@@ -4,80 +4,16 @@ on:
   push:
     branches:
       - main
-      - 'release-*'
+      - v2-next
   pull_request:
     branches:
       - main
-      - 'release-*'
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - ".github/ISSUE_TEMPLATE/*"
-      - ".goreleaser.yaml"
-      - "contrib/manifests/**"
+      - v2-next
 
-# NOTE!!!
-#
-# If you add a job here that is a REQUIRED status check in GitHub, you MUST add a job with the same name to ci-docs-only.yaml
-#
-# NOTE!!!
+permissions:
+  contents: read
 
 jobs:
-  go-test-e2e:
-    name: go-test-e2e
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-      with:
-        go-version: v1.26.2
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-      with:
-        node-version: '20'
-    - run: cd web && npm install
-    - run: make build-web
-    - run: make test-e2e
-
-  go-test-e2e-contrib:
-    name: go-test-e2e-contrib
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-      with:
-        go-version: v1.26.2
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-      with:
-        node-version: '20'
-    - run: cd web && npm install
-    - run: make build-web
-    - run: make test-e2e-contribs
-
-  go-test:
-    name: go-test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-      with:
-        go-version: v1.26.2
-    - run: make test
-
-  # The v2 slim-core lives in its own go.work workspace (v2/sdk + v2/konnector)
-  # which the root `make test` does not descend into. lint/verify already cover
-  # v2 via GOMODS; this job adds its build, vet, unit, and envtest e2e suites.
-  v2-test:
-    name: v2-test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-      with:
-        go-version: v1.26.2
-    - run: cd v2 && make build vet test
-    # test-e2e downloads envtest binaries on demand via setup-envtest.
-    - run: cd v2 && make test-e2e
-
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -86,7 +22,20 @@ jobs:
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: v1.26.2
+    - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
     - run: make lint
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version: v1.26.2
+    - run: make build vet test
+    # test-e2e downloads envtest binaries on demand via setup-envtest.
+    - run: make test-e2e
 
   verify:
     name: verify
@@ -96,31 +45,18 @@ jobs:
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: v1.26.2
-    - run: make verify
+    - run: make verify-boilerplate
 
   image-build:
     name: image-build
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-      with:
-        go-version: v1.26.2
     - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-    - run: make image-local
-
-  # Verify the v2 konnector image builds for all release architectures, without
-  # pushing. Mirrors the v2 release workflow's multi-arch buildx invocation.
-  v2-image-build:
-    name: v2-image-build
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-    - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
-    - name: Build v2 konnector image (multi-arch, no push)
+    # Multi-arch build for all release architectures, without pushing.
+    - name: Build konnector image (multi-arch, no push)
       run: |
         docker buildx build \
           --platform linux/amd64,linux/arm64 \
-          --file v2/konnector/Dockerfile \
           --provenance=false \
-          v2
+          .
