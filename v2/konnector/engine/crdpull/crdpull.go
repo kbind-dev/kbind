@@ -31,12 +31,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // AnnotationSchemaHash records the hash of the installed schema so updatePolicy
 // can detect provider changes without re-deriving.
-const AnnotationSchemaHash = "core.kube-bind.io/schema-hash"
+const AnnotationSchemaHash = "core.kbind.io/schema-hash"
 
 // Options control how the CRD is reconciled on the consumer.
 type Options struct {

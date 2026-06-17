@@ -4,7 +4,7 @@ kind: CustomResourceDefinition
 metadata:
   name: widgets.example.org
   labels:
-    core.kube-bind.io/exported: "true"
+    core.kbind.io/exported: "true"
 spec:
   group: example.org
   names:

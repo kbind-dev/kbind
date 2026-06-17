@@ -15,9 +15,9 @@
 # v2 slim-core konnector image.
 #
 # Build context is the v2/ directory (the konnector module's `replace
-# github.com/kube-bind/kube-bind/v2/sdk => ../sdk` needs the sibling sdk module):
+# github.com/kbind/kbind/v2/sdk => ../sdk` needs the sibling sdk module):
 #
-#   docker build -f konnector/Dockerfile -t kube-bind/konnector:dev .
+#   docker build -f konnector/Dockerfile -t kbind/konnector:dev .
 #
 # from inside v2/.
 # Pin the builder to the build host's native platform and cross-compile via

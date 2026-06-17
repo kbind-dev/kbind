@@ -55,15 +55,15 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/binding"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/connection"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/provider"
-	syncengine "github.com/kube-bind/kube-bind/v2/konnector/engine/sync"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/binding"
+	"github.com/kbind/kbind/v2/konnector/engine/connection"
+	"github.com/kbind/kbind/v2/konnector/engine/provider"
+	syncengine "github.com/kbind/kbind/v2/konnector/engine/sync"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
-// KubeBindNamespace is the konnector's designated namespace on the consumer.
-const KubeBindNamespace = "kube-bind"
+// KbindNamespace is the konnector's designated namespace on the consumer.
+const KbindNamespace = "kbind"
 
 // Env is a running provider+consumer test environment with the engine wired up.
 type Env struct {
@@ -89,14 +89,14 @@ func (e *Env) RestrictedProviderSecret(t *testing.T, name string) *corev1.Secret
 	kubeconfig, err := kubeconfigFromRestConfig(au.Config())
 	require.NoError(t, err)
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KubeBindNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KbindNamespace},
 		Data:       map[string][]byte{"kubeconfig": kubeconfig},
 	}
 }
 
 // Start brings up two envtest API servers, installs the core CRDs on the
 // consumer, creates the kube-system namespaces (for cluster identity) and the
-// kube-bind namespace, stores the provider kubeconfig as a Secret on the
+// kbind namespace, stores the provider kubeconfig as a Secret on the
 // consumer, and starts the engine reconcilers in-process against the consumer.
 var setLoggerOnce sync.Once
 
@@ -140,14 +140,14 @@ func Start(t *testing.T) *Env {
 	// (envtest may already seed it, so tolerate AlreadyExists).
 	ensureNamespace(t, consumerClient, "kube-system")
 	ensureNamespace(t, providerClient, "kube-system")
-	ensureNamespace(t, consumerClient, KubeBindNamespace)
+	ensureNamespace(t, consumerClient, KbindNamespace)
 
 	// Store the provider kubeconfig as a Secret on the consumer (the credential
 	// the Connection references).
 	kubeconfig, err := kubeconfigFromRestConfig(providerCfg)
 	require.NoError(t, err)
 	require.NoError(t, consumerClient.Create(ctx, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider-kubeconfig", Namespace: KubeBindNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider-kubeconfig", Namespace: KbindNamespace},
 		Data:       map[string][]byte{"kubeconfig": kubeconfig},
 	}))
 
@@ -215,16 +215,16 @@ func startEngine(t *testing.T, consumerCfg *rest.Config, scheme *apimachineryrun
 	require.True(t, localMgr.GetCache().WaitForCacheSync(ctx), "engine cache sync")
 }
 
-// CopyProviderSecret returns a new Secret named `name` in the kube-bind
+// CopyProviderSecret returns a new Secret named `name` in the kbind
 // namespace carrying the same provider kubeconfig as the one created by Start.
 // Used to test Connection-before-Secret ordering.
 func (e *Env) CopyProviderSecret(t *testing.T, name string) *corev1.Secret {
 	t.Helper()
 	var src corev1.Secret
 	require.NoError(t, e.ConsumerClient.Get(context.Background(),
-		client.ObjectKey{Namespace: KubeBindNamespace, Name: "demo-provider-kubeconfig"}, &src))
+		client.ObjectKey{Namespace: KbindNamespace, Name: "demo-provider-kubeconfig"}, &src))
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KubeBindNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: KbindNamespace},
 		Data:       src.Data,
 	}
 }

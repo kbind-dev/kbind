@@ -35,11 +35,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/binding"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/connection"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/provider"
-	syncengine "github.com/kube-bind/kube-bind/v2/konnector/engine/sync"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/binding"
+	"github.com/kbind/kbind/v2/konnector/engine/connection"
+	"github.com/kbind/kbind/v2/konnector/engine/provider"
+	syncengine "github.com/kbind/kbind/v2/konnector/engine/sync"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 var scheme = runtime.NewScheme()
@@ -64,7 +64,7 @@ func main() {
 	flag.StringVar(&o.probeAddr, "health-probe-bind-address", ":8081", "address the health/readiness probe endpoint binds to")
 	flag.BoolVar(&o.leaderElect, "leader-elect", false,
 		"enable leader election, ensuring only one active konnector replica (required for HA / multiple replicas)")
-	flag.StringVar(&o.leaderElectionID, "leader-election-id", "konnector.kube-bind.io",
+	flag.StringVar(&o.leaderElectionID, "leader-election-id", "konnector.kbind.io",
 		"name of the Lease used for leader election")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)

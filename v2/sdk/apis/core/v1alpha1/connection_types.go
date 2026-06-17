@@ -24,7 +24,7 @@ import (
 // schema delivery, and surfaces what the provider exports. Cluster-scoped.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Cluster,categories=kube-bind
+// +kubebuilder:resource:scope=Cluster,categories=kbind
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Secret",type=string,JSONPath=`.spec.kubeconfigSecretRef.name`

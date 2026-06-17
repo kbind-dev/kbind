@@ -32,7 +32,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // ProviderClient builds a direct (uncached) client for the provider cluster a

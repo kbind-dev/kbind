@@ -4,12 +4,12 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: connections.core.kube-bind.io
+  name: connections.core.kbind.io
 spec:
-  group: core.kube-bind.io
+  group: core.kbind.io
   names:
     categories:
-    - kube-bind
+    - kbind
     kind: Connection
     listKind: ConnectionList
     plural: connections

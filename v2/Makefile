@@ -29,7 +29,7 @@ konnector:
 	cd konnector && go build -o bin/konnector ./cmd/konnector
 
 # Container image. Build context is v2/ so the konnector's `replace ../sdk` resolves.
-IMAGE ?= ghcr.io/kube-bind/konnector:dev
+IMAGE ?= ghcr.io/kbind/konnector:dev
 .PHONY: image
 image:
 	docker build -f konnector/Dockerfile -t $(IMAGE) .
@@ -42,12 +42,12 @@ helm-lint:
 # Render the chart to stdout for review (extra flags via HELM_ARGS=...).
 .PHONY: helm-template
 helm-template:
-	helm template konnector $(CHART) -n kube-bind $(HELM_ARGS)
+	helm template konnector $(CHART) -n kbind $(HELM_ARGS)
 
 # Refresh the chart's bundled CRDs from the generated sdk CRDs.
 .PHONY: helm-sync-crds
 helm-sync-crds: codegen
-	cp sdk/config/crd/core.kube-bind.io_*.yaml $(CHART)/files/crds/
+	cp sdk/config/crd/core.kbind.io_*.yaml $(CHART)/files/crds/
 
 .PHONY: codegen
 codegen:

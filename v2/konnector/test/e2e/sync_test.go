@@ -33,8 +33,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/test/e2e/framework"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/test/e2e/framework"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 const (
@@ -61,7 +61,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider"},
 		Spec: corev1alpha1.ConnectionSpec{
 			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{
-				Namespace: framework.KubeBindNamespace,
+				Namespace: framework.KbindNamespace,
 				Name:      "demo-provider-kubeconfig",
 				Key:       "kubeconfig",
 			},
@@ -106,7 +106,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 						return nil, false
 					}
 					l := &coordinationv1.Lease{}
-					key := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "consumer-" + conn.Status.LocalClusterUID}
+					key := client.ObjectKey{Namespace: framework.KbindNamespace, Name: "consumer-" + conn.Status.LocalClusterUID}
 					if err := env.ProviderClient.Get(ctx, key, l); err != nil {
 						return nil, false
 					}
@@ -373,7 +373,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: "late-provider"},
 					Spec: corev1alpha1.ConnectionSpec{
 						KubeconfigSecretRef: corev1alpha1.SecretKeyRef{
-							Namespace: framework.KubeBindNamespace,
+							Namespace: framework.KbindNamespace,
 							Name:      "late-secret",
 							Key:       "kubeconfig",
 						},
@@ -404,7 +404,7 @@ func TestSlimCoreHappyCase(t *testing.T) {
 			// only when the Connection is deleted.
 			name: "Secret survives deletion while its Connection exists, released on Connection delete",
 			step: func(t *testing.T) {
-				secretKey := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "late-secret"}
+				secretKey := client.ObjectKey{Namespace: framework.KbindNamespace, Name: "late-secret"}
 				// The Connection reconcile should have stamped the finalizer.
 				require.Eventually(t, func() bool {
 					s := &corev1.Secret{}
@@ -447,14 +447,14 @@ func TestSlimCoreHappyCase(t *testing.T) {
 			// the LAST Connection referencing it is gone.
 			name: "Secret shared by multiple Connections is released only when the last one is deleted",
 			step: func(t *testing.T) {
-				sharedKey := client.ObjectKey{Namespace: framework.KubeBindNamespace, Name: "shared-secret"}
+				sharedKey := client.ObjectKey{Namespace: framework.KbindNamespace, Name: "shared-secret"}
 				require.NoError(t, env.ConsumerClient.Create(ctx, env.CopyProviderSecret(t, "shared-secret")))
 				for _, name := range []string{"shared-a", "shared-b"} {
 					require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 						ObjectMeta: metav1.ObjectMeta{Name: name},
 						Spec: corev1alpha1.ConnectionSpec{
 							KubeconfigSecretRef: corev1alpha1.SecretKeyRef{
-								Namespace: framework.KubeBindNamespace, Name: "shared-secret", Key: "kubeconfig",
+								Namespace: framework.KbindNamespace, Name: "shared-secret", Key: "kubeconfig",
 							},
 							Schema: corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
 						},

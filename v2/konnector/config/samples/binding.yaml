@@ -1,18 +1,18 @@
 # The "one apply" bundle. Apply this on the CONSUMER cluster.
 # (The kubeconfig Secret is created separately by the demo script.)
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.io/v1alpha1
 kind: Connection
 metadata:
   name: demo-provider
 spec:
   kubeconfigSecretRef:
-    namespace: kube-bind
+    namespace: kbind
     name: demo-provider-kubeconfig
     key: kubeconfig
   schema:
     source: CRD
 ---
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.io/v1alpha1
 kind: ClusterBinding
 metadata:
   name: widgets

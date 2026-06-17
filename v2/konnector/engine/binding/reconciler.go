@@ -39,9 +39,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/crdpull"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/crdpull"
+	"github.com/kbind/kbind/v2/konnector/engine/remote"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // base holds the shared dependencies and logic for both binding kinds.

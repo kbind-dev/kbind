@@ -27,11 +27,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // relatedFieldOwner is the SSA field manager for related-resource writes.
-const relatedFieldOwner = "kube-bind-konnector-related"
+const relatedFieldOwner = "kbind-konnector-related"
 
 // relatedGVK maps a related-resource kind to its GVK. Only secrets/configmaps.
 func relatedGVK(resource string) (schema.GroupVersionKind, bool) {

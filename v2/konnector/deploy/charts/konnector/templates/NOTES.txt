@@ -1,4 +1,4 @@
-The kube-bind konnector is installed as "{{ include "konnector.fullname" . }}" in namespace "{{ .Release.Namespace }}".
+The kbind konnector is installed as "{{ include "konnector.fullname" . }}" in namespace "{{ .Release.Namespace }}".
 
 Replicas:        {{ .Values.replicaCount }}
 Leader election: {{ include "konnector.leaderElect" . }}

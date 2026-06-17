@@ -1,10 +1,10 @@
-module github.com/kube-bind/kube-bind/v2/konnector
+module github.com/kbind/kbind/v2/konnector
 
 go 1.26.2
 
 require (
 	github.com/go-logr/logr v1.4.2
-	github.com/kube-bind/kube-bind/v2/sdk v0.0.0-00010101000000-000000000000
+	github.com/kbind/kbind/v2/sdk v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/sync v0.12.0
 	k8s.io/api v0.33.4
@@ -69,4 +69,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/kube-bind/kube-bind/v2/sdk => ../sdk
+replace github.com/kbind/kbind/v2/sdk => ../sdk

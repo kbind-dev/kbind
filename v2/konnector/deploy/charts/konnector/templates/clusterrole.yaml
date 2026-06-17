@@ -6,14 +6,14 @@ metadata:
   labels:
     {{- include "konnector.labels" . | nindent 4 }}
 rules:
-  # Core kube-bind objects the konnector reconciles (+ status, + finalizers).
-  - apiGroups: ["core.kube-bind.io"]
+  # Core kbind objects the konnector reconciles (+ status, + finalizers).
+  - apiGroups: ["core.kbind.io"]
     resources: ["connections", "clusterbindings", "bindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["core.kube-bind.io"]
+  - apiGroups: ["core.kbind.io"]
     resources: ["connections/status", "clusterbindings/status", "bindings/status"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["core.kube-bind.io"]
+  - apiGroups: ["core.kbind.io"]
     resources: ["connections/finalizers", "clusterbindings/finalizers", "bindings/finalizers"]
     verbs: ["update"]
   # CRDs: the konnector pulls/synthesizes and installs the bound APIs, stamps

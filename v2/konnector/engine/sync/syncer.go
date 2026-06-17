@@ -38,13 +38,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/mapper"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/mapper"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 const (
 	// fieldOwner is the server-side-apply field manager for spec writes.
-	fieldOwner = "kube-bind-konnector"
+	fieldOwner = "kbind-konnector"
 	// statusResyncBackstop is a low-frequency safety net. Provider-originated
 	// changes (status, drift) are primarily delivered by the engaged-cluster
 	// watch; this just heals any missed watch event.

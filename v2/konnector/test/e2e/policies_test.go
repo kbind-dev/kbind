@@ -29,8 +29,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/test/e2e/framework"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/test/e2e/framework"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // TestSlimCorePolicies exercises the binding/connection policy knobs. It shares
@@ -49,7 +49,7 @@ func TestSlimCorePolicies(t *testing.T) {
 	require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider"},
 		Spec: corev1alpha1.ConnectionSpec{
-			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 			Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
 		},
 	}))
@@ -117,7 +117,7 @@ func TestSlimCorePolicies(t *testing.T) {
 		require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 			ObjectMeta: metav1.ObjectMeta{Name: "auto-provider"},
 			Spec: corev1alpha1.ConnectionSpec{
-				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 				Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
 				AutoBind:            true,
 			},
@@ -144,7 +144,7 @@ func TestSlimCorePolicies(t *testing.T) {
 		require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 			ObjectMeta: metav1.ObjectMeta{Name: "all-provider"},
 			Spec: corev1alpha1.ConnectionSpec{
-				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 				Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD, PullPolicy: corev1alpha1.PullPolicyAll},
 			},
 		}))
@@ -160,7 +160,7 @@ func TestSlimCorePolicies(t *testing.T) {
 		require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 			ObjectMeta: metav1.ObjectMeta{Name: "restricted-provider"},
 			Spec: corev1alpha1.ConnectionSpec{
-				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "restricted-secret", Key: "kubeconfig"},
+				KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "restricted-secret", Key: "kubeconfig"},
 				Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
 			},
 		}))

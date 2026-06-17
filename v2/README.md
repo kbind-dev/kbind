@@ -1,4 +1,4 @@
-# kube-bind v2 — slim core (POC)
+# kbind v2 — slim core (POC)
 
 This directory is the v2 "slim core" implementation. See
 [../docs/proposals/v2-slim-core.md](../docs/proposals/v2-slim-core.md) for the design.
@@ -11,7 +11,7 @@ outside imports v2 (the path tells you the version).
 ```
 v2/
 ├── go.work                 # ties the two modules for local dev
-├── sdk/                    # module: type-only API (core.kube-bind.io)
+├── sdk/                    # module: type-only API (core.kbind.io)
 │   └── apis/core/v1alpha1/ #   Connection, ClusterBinding, Binding
 │   └── config/crd/         #   generated CRD manifests
 ├── konnector/              # module: the slim sync engine + binary
@@ -99,10 +99,10 @@ running component of the core (no backend, no provider-side controllers).
 
 ```sh
 cd v2
-make image IMAGE=ghcr.io/kube-bind/konnector:dev          # build the image
+make image IMAGE=ghcr.io/kbind/konnector:dev          # build the image
 helm install konnector konnector/deploy/charts/konnector \
-  -n kube-bind --create-namespace \
-  --set image.repository=ghcr.io/kube-bind/konnector --set image.tag=dev
+  -n kbind --create-namespace \
+  --set image.repository=ghcr.io/kbind/konnector --set image.tag=dev
 ```
 
 The chart ([konnector/deploy/charts/konnector](konnector/deploy/charts/konnector))

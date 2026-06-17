@@ -23,7 +23,7 @@ import (
 
 const (
 	// GroupName is the API group for the v2 slim core.
-	GroupName = "core.kube-bind.io"
+	GroupName = "core.kbind.io"
 
 	// Version is the API version of this package.
 	Version = "v1alpha1"

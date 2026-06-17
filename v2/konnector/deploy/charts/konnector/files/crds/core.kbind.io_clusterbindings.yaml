@@ -4,17 +4,17 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: bindings.core.kube-bind.io
+  name: clusterbindings.core.kbind.io
 spec:
-  group: core.kube-bind.io
+  group: core.kbind.io
   names:
     categories:
-    - kube-bind
-    kind: Binding
-    listKind: BindingList
-    plural: bindings
-    singular: binding
-  scope: Namespaced
+    - kbind
+    kind: ClusterBinding
+    listKind: ClusterBindingList
+    plural: clusterbindings
+    singular: clusterbinding
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.connectionRef.name
@@ -30,10 +30,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Binding activates instance sync for one or more exported APIs within its own
-          namespace. Namespaced, following the Role convention. It is the v2 answer to
-          v1's informerScope: Namespaced. Where a ClusterBinding and a Binding cover the
-          same API on the same connection, the ClusterBinding wins.
+          ClusterBinding activates instance sync for one or more exported APIs
+          cluster-wide. Cluster-scoped, following the ClusterRole convention.
         properties:
           apiVersion:
             description: |-

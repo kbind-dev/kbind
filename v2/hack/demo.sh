@@ -19,8 +19,8 @@
 # konnector syncs instances. Run the konnector separately (printed at the end).
 set -euo pipefail
 
-PROVIDER=kube-bind-provider
-CONSUMER=kube-bind-consumer
+PROVIDER=kbind-provider
+CONSUMER=kbind-consumer
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2="$(cd "${HERE}/.." && pwd)"
 SAMPLES="${V2}/konnector/config/samples"
@@ -42,13 +42,13 @@ kc() { kubectl --kubeconfig "${CONSUMER_KC}" "$@"; }
 echo "==> Provider: install + export the Widget CRD"
 kp apply -f "${SAMPLES}/provider-widget-crd.yaml"
 
-echo "==> Consumer: install core CRDs and the kube-bind namespace"
+echo "==> Consumer: install core CRDs and the kbind namespace"
 kc apply -f "${V2}/sdk/config/crd"
-kc create namespace kube-bind --dry-run=client -o yaml | kc apply -f -
+kc create namespace kbind --dry-run=client -o yaml | kc apply -f -
 
 echo "==> Consumer: store the provider kubeconfig as a Secret"
-kc -n kube-bind delete secret demo-provider-kubeconfig --ignore-not-found
-kc -n kube-bind create secret generic demo-provider-kubeconfig \
+kc -n kbind delete secret demo-provider-kubeconfig --ignore-not-found
+kc -n kbind create secret generic demo-provider-kubeconfig \
   --from-file=kubeconfig="${PROVIDER_KC}"
 
 echo "==> Consumer: the one-apply bundle (Connection + ClusterBinding)"

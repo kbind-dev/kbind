@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/mapper"
+	"github.com/kbind/kbind/v2/konnector/engine/mapper"
 )
 
 var widgetGVR = schema.GroupVersionResource{Group: "example.org", Version: "v1", Resource: "widgets"}

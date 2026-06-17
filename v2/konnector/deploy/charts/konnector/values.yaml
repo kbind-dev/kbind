@@ -1,7 +1,7 @@
 # Default values for the konnector chart.
 
 image:
-  repository: ghcr.io/kube-bind/konnector
+  repository: ghcr.io/kbind/konnector
   # Defaults to the chart appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent
@@ -17,7 +17,7 @@ replicaCount: 1
 # Leader election ensures a single active replica. Enable for HA / replicaCount>1.
 # It is forced on automatically whenever replicaCount > 1.
 leaderElect: false
-leaderElectionID: konnector.kube-bind.io
+leaderElectionID: konnector.kbind.io
 
 serviceAccount:
   create: true

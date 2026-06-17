@@ -1,16 +1,16 @@
 apiVersion: v2
 name: konnector
-description: kube-bind v2 slim-core konnector — the consumer-side sync engine.
+description: kbind v2 slim-core konnector — the consumer-side sync engine.
 type: application
 
 # version / appVersion are placeholders bumped by the release tooling.
 version: 0.0.0
 appVersion: "0.0.0"
 
-home: https://kube-bind.io
+home: https://kbind.io
 sources:
-  - https://github.com/kube-bind/kube-bind
+  - https://github.com/kbind/kbind
 keywords:
-  - kube-bind
+  - kbind
   - multicluster
   - api-binding

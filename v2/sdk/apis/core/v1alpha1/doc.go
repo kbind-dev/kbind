@@ -14,10 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains the v2 "slim core" API for kube-bind:
-// the Connection, ClusterBinding and Binding kinds in the core.kube-bind.io
+// Package v1alpha1 contains the v2 "slim core" API for kbind:
+// the Connection, ClusterBinding and Binding kinds in the core.kbind.io
 // group. See docs/proposals/v2-slim-core.md for the design.
 //
 // +kubebuilder:object:generate=true
-// +groupName=core.kube-bind.io
+// +groupName=core.kbind.io
 package v1alpha1

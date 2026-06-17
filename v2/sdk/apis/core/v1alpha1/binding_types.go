@@ -26,7 +26,7 @@ import (
 // same API on the same connection, the ClusterBinding wins.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Namespaced,categories=kube-bind
+// +kubebuilder:resource:scope=Namespaced,categories=kbind
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connectionRef.name`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`

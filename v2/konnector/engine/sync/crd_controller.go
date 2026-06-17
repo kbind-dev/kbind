@@ -52,8 +52,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/mapper"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/mapper"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 const cleanupTimeout = 10 * time.Second
@@ -113,7 +113,7 @@ func SetupWithManager(mgr ctrl.Manager, clusters ClusterGetter, opts ...Option) 
 		consumerConfig: mgr.GetConfig(),
 		consumerClient: consumerClient,
 		clusters:       clusters,
-		recorder:       mgr.GetEventRecorderFor("kube-bind-konnector"),
+		recorder:       mgr.GetEventRecorderFor("kbind-konnector"),
 		resync:         time.Minute,
 		mapper:         mapper.Identity{},
 		contexts:       map[string]*syncContext{},

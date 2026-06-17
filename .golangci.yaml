@@ -93,6 +93,7 @@ formatters:
         - default
         - prefix(github.com/kube-bind)
         - prefix(github.com/kube-bind/sdk)
+        - prefix(github.com/kbind)
         - blank
         - dot
       custom-order: true

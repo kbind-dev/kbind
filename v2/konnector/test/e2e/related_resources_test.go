@@ -27,8 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/test/e2e/framework"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/test/e2e/framework"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // TestSlimCoreRelatedResources binds the Widget API with a relatedResources rule
@@ -41,7 +41,7 @@ func TestSlimCoreRelatedResources(t *testing.T) {
 	require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider"},
 		Spec: corev1alpha1.ConnectionSpec{
-			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 			Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceCRD},
 		},
 	}))

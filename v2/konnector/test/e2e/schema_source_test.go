@@ -28,8 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/test/e2e/framework"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/test/e2e/framework"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // TestSlimCoreOpenAPISource exercises schema.source: OpenAPI — the Connection
@@ -43,7 +43,7 @@ func TestSlimCoreOpenAPISource(t *testing.T) {
 	require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-provider"},
 		Spec: corev1alpha1.ConnectionSpec{
-			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 			Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceOpenAPI},
 		},
 	}))
@@ -111,7 +111,7 @@ func TestSlimCoreKCPLikeProvider(t *testing.T) {
 	require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.Connection{
 		ObjectMeta: metav1.ObjectMeta{Name: "kcp-provider"},
 		Spec: corev1alpha1.ConnectionSpec{
-			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KubeBindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
+			KubeconfigSecretRef: corev1alpha1.SecretKeyRef{Namespace: framework.KbindNamespace, Name: "demo-provider-kubeconfig", Key: "kubeconfig"},
 			Schema:              corev1alpha1.SchemaPolicy{Source: corev1alpha1.SchemaSourceOpenAPI},
 		},
 	}))

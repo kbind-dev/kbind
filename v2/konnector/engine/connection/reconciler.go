@@ -40,10 +40,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/crdpull"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/openapi"
-	"github.com/kube-bind/kube-bind/v2/konnector/engine/remote"
-	corev1alpha1 "github.com/kube-bind/kube-bind/v2/sdk/apis/core/v1alpha1"
+	"github.com/kbind/kbind/v2/konnector/engine/crdpull"
+	"github.com/kbind/kbind/v2/konnector/engine/openapi"
+	"github.com/kbind/kbind/v2/konnector/engine/remote"
+	corev1alpha1 "github.com/kbind/kbind/v2/sdk/apis/core/v1alpha1"
 )
 
 // Reconciler reconciles Connection objects on the consumer cluster.
@@ -60,12 +60,12 @@ type Reconciler struct {
 	// (so a CRD labeled exported after connect is picked up). 0 = default 30s.
 	DiscoveryResync time.Duration
 	// LeaseNamespace is the provider namespace where the konnector maintains its
-	// heartbeat Lease. 0 = default "kube-bind".
+	// heartbeat Lease. 0 = default "kbind".
 	LeaseNamespace string
 }
 
 const (
-	leaseNamespaceDefault = "kube-bind"
+	leaseNamespaceDefault = "kbind"
 	leaseDurationSeconds  = 60
 )
 
@@ -245,7 +245,7 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 }
 
 // heartbeat creates or renews a coordination.k8s.io/Lease on the provider in the
-// designated namespace, keyed by the consumer cluster identity. Zero kube-bind
+// designated namespace, keyed by the consumer cluster identity. Zero kbind
 // CRDs on the provider — just a plain Lease.
 func (r *Reconciler) heartbeat(ctx context.Context, providerClient client.Client, conn *corev1alpha1.Connection) error {
 	if conn.Status.LocalClusterUID == "" {

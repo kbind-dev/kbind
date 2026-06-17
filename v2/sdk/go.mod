@@ -1,4 +1,4 @@
-module github.com/kube-bind/kube-bind/v2/sdk
+module github.com/kbind/kbind/v2/sdk
 
 go 1.26.2
 

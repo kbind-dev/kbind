@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(helm template *)",
+      "Bash(tilt logs *)",
+      "Bash(make -n *)",
+      "Bash(go vet *)",
+      "Bash(go list *)",
+      "mcp__kedge-default__infrastructure__list_templates",
+      "mcp__kedge-default__infrastructure__describe_template",
+      "mcp__github__pull_request_read",
+      "Bash(*)"
+    ]
+  }
+}
