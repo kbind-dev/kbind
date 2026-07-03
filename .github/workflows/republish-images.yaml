@@ -1,0 +1,178 @@
+# Ad-hoc workflow to republish release images that were purged from GHCR
+# when the GitHub organization was renamed (kube-bind -> kbind-dev).
+#
+# Run it manually:
+#   gh workflow run republish-images.yaml -f tags="v0.7.0 v0.7.1 v0.8.0 v0.8.1"
+#
+# For each tag it checks out the tag and rebuilds/pushes/signs the multi-arch
+# (linux/amd64 + linux/arm64) konnector and backend images the same way the
+# Image workflow did at those tags. It deliberately does NOT push the
+# `latest` tag so old releases don't overwrite it.
+name: Republish release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Space-separated release tags to republish'
+        required: true
+        default: 'v0.7.0 v0.7.1 v0.8.0 v0.8.1'
+      push_charts:
+        description: 'Also republish Helm charts (deploy/charts/*)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.set.outputs.tags }}
+    steps:
+    - id: set
+      run: echo "tags=$(echo '${{ inputs.tags }}' | jq -cR 'split(" ") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  republish:
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.matrix.outputs.tags) }}
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        ref: ${{ matrix.tag }}
+        # Full history + tags so `make ldflags` (git describe) works.
+        fetch-depth: 0
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        # Only used by `make ldflags` (go mod edit -json); the image builds
+        # use the Go toolchain baked into each tag's Dockerfile.
+        go-version: stable
+        check-latest: true
+
+    # Remove non-semver tags (cli/*, sdk/*) so git describe picks the right one.
+    - name: Delete non-semver tags
+      run: 'git tag -d $(git tag -l | grep -v "^v")'
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+    - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Install Helm
+      if: ${{ inputs.push_charts }}
+      uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      with:
+        version: 'v3.12.0'
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Compute build env
+      run: |
+        {
+          echo "LDFLAGS=$(make ldflags)"
+          echo "TAG_SHA=$(git rev-parse HEAD)"
+        } >> "$GITHUB_ENV"
+
+    - name: Build and push konnector image
+      uses: docker/build-push-action@v6
+      id: build-konnector
+      with:
+        context: .
+        file: ./Dockerfile.konnector
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/konnector:${{ matrix.tag }}
+          ghcr.io/${{ github.repository_owner }}/konnector:${{ env.TAG_SHA }}
+        build-args: |
+          LDFLAGS=${{ env.LDFLAGS }}
+        labels: |
+          org.opencontainers.image.title=Kube Bind Konnector
+          org.opencontainers.image.description=Kube Bind konnector component
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ env.TAG_SHA }}
+          org.opencontainers.image.version=${{ matrix.tag }}
+
+    - name: Sign konnector image
+      env:
+        COSIGN_EXPERIMENTAL: 'true'
+      run: |
+        img="ghcr.io/${{ github.repository_owner }}/konnector@${{ steps.build-konnector.outputs.digest }}"
+        echo "signing ${img}"
+        cosign sign ${img} \
+            --yes \
+            -a sha=${TAG_SHA} \
+            -a ref=refs/tags/${{ matrix.tag }} \
+            -a run_id=${{ github.run_id }} \
+            -a run_attempt=${{ github.run_attempt }}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v6
+      id: build-backend
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/backend:${{ matrix.tag }}
+          ghcr.io/${{ github.repository_owner }}/backend:${{ env.TAG_SHA }}
+        build-args: |
+          LDFLAGS=${{ env.LDFLAGS }}
+        labels: |
+          org.opencontainers.image.title=Kube Bind Backend
+          org.opencontainers.image.description=Kube Bind backend with integrated Vue.js frontend
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ env.TAG_SHA }}
+          org.opencontainers.image.version=${{ matrix.tag }}
+
+    - name: Sign backend image
+      env:
+        COSIGN_EXPERIMENTAL: 'true'
+      run: |
+        img="ghcr.io/${{ github.repository_owner }}/backend@${{ steps.build-backend.outputs.digest }}"
+        echo "signing ${img}"
+        cosign sign ${img} \
+            --yes \
+            -a sha=${TAG_SHA} \
+            -a ref=refs/tags/${{ matrix.tag }} \
+            -a run_id=${{ github.run_id }} \
+            -a run_attempt=${{ github.run_attempt }}
+
+    - name: Package and push Helm charts as OCI
+      if: ${{ inputs.push_charts }}
+      env:
+        HELM_EXPERIMENTAL_OCI: '1'
+      run: |
+        echo "${{ github.token }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+        CHART_VERSION="${{ matrix.tag }}"
+        CHART_VERSION="${CHART_VERSION#v}"
+
+        for chart_dir in deploy/charts/*/; do
+          if [ -f "${chart_dir}Chart.yaml" ]; then
+            chart_name=$(basename "$chart_dir")
+            echo "Processing chart: $chart_name"
+
+            sed -i "s/^version:.*/version: ${CHART_VERSION}/" "${chart_dir}Chart.yaml"
+            sed -i "s/^appVersion:.*/appVersion: ${CHART_VERSION}/" "${chart_dir}Chart.yaml"
+
+            helm package "$chart_dir" --version "${CHART_VERSION}"
+            helm push "${chart_name}-${CHART_VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+            echo "Helm chart pushed to oci://ghcr.io/${{ github.repository_owner }}/charts/${chart_name}:${CHART_VERSION}"
+          fi
+        done
