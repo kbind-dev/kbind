@@ -177,7 +177,7 @@ helm upgrade --install \
     --set backend.tlsExternalServerName=kubernetes.default.svc \
     --set backend.oidc.issuerUrl=http://kube-bind-backend.kube-bind.svc:8080/oidc \
     --set backend.oidc.callbackUrl=http://kube-bind-backend.kube-bind.svc:8080/api/callback \
-    kube-bind oci://ghcr.io/kube-bind/charts/backend --version 0.7.1
+    kube-bind oci://ghcr.io/kbind-dev/charts/backend --version 0.7.1
 ```
 
 > **Note:** The OIDC configuration used here (which uses the built-in mock OIDC provider of `kube-bind-backend`) is for demonstration purposes only. For a production deployment, you must integrate with a real OIDC provider. See [Installation with Helm](../../setup/helm.md) for production guidelines.

@@ -87,7 +87,7 @@ func NewDevOptions(streams genericclioptions.IOStreams) *DevOptions {
 		Streams:             streams,
 		ProviderClusterName: "kind-provider",
 		ConsumerClusterName: "kind-consumer",
-		ChartPath:           "oci://ghcr.io/kube-bind/charts/backend",
+		ChartPath:           "oci://ghcr.io/kbind-dev/charts/backend",
 	}
 }
 
@@ -101,7 +101,7 @@ func (o *DevOptions) AddCmdFlags(cmd *cobra.Command) {
 	cmd.Flags().DurationVar(&o.WaitForReadyTimeout, "wait-for-ready-timeout", 2*time.Minute, "Timeout for waiting for the cluster to be ready")
 	cmd.Flags().StringVar(&o.ChartPath, "chart-path", o.ChartPath, "Helm chart path or OCI registry URL")
 	cmd.Flags().StringVar(&o.ChartVersion, "chart-version", "", "The version of the Helm chart to use")
-	cmd.Flags().StringVar(&o.BackendImage, "backend-image", "ghcr.io/kube-bind/backend", "The name of kube-bind backend to use in dev mode")
+	cmd.Flags().StringVar(&o.BackendImage, "backend-image", "ghcr.io/kbind-dev/backend", "The name of kube-bind backend to use in dev mode")
 	cmd.Flags().StringVar(&o.BackendTag, "backend-tag", "", "The tag of the kube-bind backend image to use in dev mode")
 	cmd.Flags().StringVar(&o.KindNetwork, "kind-network", "kube-bind-dev", "The name of the kind network to use in dev mode")
 }

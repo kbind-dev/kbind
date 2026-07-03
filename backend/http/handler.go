@@ -219,7 +219,7 @@ func (h *handler) handleKonnectorManifests(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		konnectorVersion = "latest"
 	}
-	konnectorImage := fmt.Sprintf("ghcr.io/kube-bind/konnector:%s", konnectorVersion)
+	konnectorImage := fmt.Sprintf("ghcr.io/kbind-dev/konnector:%s", konnectorVersion)
 
 	manifests := kuberesources.NewKonnectorManifests(konnectorImage, h.kubeManager.GetKonnectorHostAliases())
 
@@ -617,7 +617,7 @@ func (h *handler) handleApplyBinding(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		konnectorVersion = "latest"
 	}
-	konnectorImage := fmt.Sprintf("ghcr.io/kube-bind/konnector:%s", konnectorVersion)
+	konnectorImage := fmt.Sprintf("ghcr.io/kbind-dev/konnector:%s", konnectorVersion)
 
 	// Parse optional host alias overrides from request
 	var overrideHostAliases []corev1.HostAlias
