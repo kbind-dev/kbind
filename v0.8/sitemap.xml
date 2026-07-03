@@ -2,250 +2,250 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://docs.kube-bind.io/v0.8/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/blog/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/blog/2026/02/14/deep-dive-understanding-kube-bind-internals/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/blog/2026/02/14/getting-started-with-kube-bind-the-quick-way/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/blog/2026/02/22/securing-kube-bind-with-keycloak-a-production-ready-oidc-setup/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/contributing/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/architecture/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/publishing-a-release/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/testing-changes/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/backend/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/backend/http/api-binding/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/backend/http/cluster-binding/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/backend/oidc/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/dev-environment/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/dev-environment/kcp/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/dev-environment/kind/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/apiservicebinding/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/konnector/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/cluster/apiservicebinding/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/cluster/apiserviceexport/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/cluster/apiservicenamespace/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/cluster/boundschema/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/developers/konnector/controllers/cluster/clusterbinding/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_apiservice/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_cluster-identity/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_collections/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_deploy/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_dev/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_dev_create/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_dev_delete/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_dev_example/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_login/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/cli/bind_templates/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiconversions/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiservicebindings/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiserviceexportrequests/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiserviceexports/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiserviceexporttemplates/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/apiservicenamespaces/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/bindableresourcesrequests/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/boundschemas/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/clusterbindings/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/reference/crd/kube-bind.io/collections/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/helm/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/kcp-setup/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/kind-setup/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/kubectl-plugin/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/setup/quickstart/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/api-concepts/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/synchronization/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/integrations/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/integrations/cert-manager/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/integrations/cloudnativepg/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/integrations/crossplane/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/usage/integrations/kro/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
     <url>
          <loc>https://docs.kube-bind.io/v0.8/blog/archive/2026/</loc>
-         <lastmod>2026-05-07</lastmod>
+         <lastmod>2026-07-03</lastmod>
     </url>
 </urlset>

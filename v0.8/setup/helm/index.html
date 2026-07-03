@@ -3313,7 +3313,7 @@ For more information, just check out the <a href="../quickstart/">quickstart gui
 <a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">      </span>--set<span class="w"> </span>gatewayApi.route.path<span class="o">=</span>/<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">      </span>--set<span class="w"> </span>gatewayApi.route.pathType<span class="o">=</span>PathPrefix<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">      </span>--set<span class="w"> </span>image.tag<span class="o">=</span>v<span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">      </span>kube-bind<span class="w"> </span>oci://ghcr.io/kube-bind/charts/backend<span class="w"> </span>--version<span class="w"> </span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">      </span>kube-bind<span class="w"> </span>oci://ghcr.io/kbind-dev/charts/backend<span class="w"> </span>--version<span class="w"> </span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span>
 </code></pre></div>
 <ol>
 <li><strong>Seed with example resources (optional):</strong></li>
@@ -3499,7 +3499,7 @@ https://gateway-api.sigs.k8s.io/guides/</p>
 <p>kube-bind Helm charts are published as OCI images to GitHub Container Registry:</p>
 <h3 id="backend-chart">Backend Chart</h3>
 <ul>
-<li><strong>Registry</strong>: <code>oci://ghcr.io/kube-bind/charts/backend</code></li>
+<li><strong>Registry</strong>: <code>oci://ghcr.io/kbind-dev/charts/backend</code></li>
 <li><strong>Latest Release</strong>: Use the latest tag version (e.g., <code>1.0.0</code>)</li>
 <li><strong>Development Builds</strong>: Available as <code>0.0.0-&lt;git-sha&gt;</code> format for each commit to main</li>
 </ul>
