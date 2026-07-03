@@ -1,4 +1,4 @@
-# kube-bind v2: Slim Core, Pluggable Everything Else
+# kbind v2: Slim Core, Pluggable Everything Else
 
 * Status: **Proposed**
 * Authors: @mjudeikis
@@ -13,8 +13,8 @@ implementation, not re-design.
 
 ## Summary
 
-kube-bind v2 splits the project into a **slim sync core** and an **optional service
-layer**. The core does exactly one thing: given a Secret containing a kubeconfig, a
+kbind v2 (kbind is the project formerly known as kube-bind) splits the project into a
+**slim sync core** and an **optional service layer**. The core does exactly one thing: given a Secret containing a kubeconfig, a
 connection object, and a binding per API, it syncs CRDs and resource instances between a
 consumer and a provider cluster — same scope, same names, no transformation — and reports
 conflicts instead of papering over them.
@@ -97,7 +97,7 @@ and the `Binding`/`ClusterBinding` objects).
 * CRD/schema delivery in core: applying the core objects yields working APIs on the
   consumer.
 * Related-resource sync (Secrets/ConfigMaps referenced by synced objects) in core.
-* Zero kube-bind components required on the provider cluster for the core path.
+* Zero kbind components required on the provider cluster for the core path.
 * Portability and extension points so v1-style behaviors (tenancy mapping, handshakes,
   UIs) can be rebuilt *on top*.
 
@@ -118,7 +118,7 @@ and the `Binding`/`ClusterBinding` objects).
 provider, the operator marks which CRDs are exported by labeling them:
 
 ```sh
-kubectl label crd mangodbs.mangodb.io "core.kube-bind.io/exported=true"
+kubectl label crd mangodbs.mangodb.io "core.kbind.dev/exported=true"
 ```
 
 Whatever carries the label *and* is readable by the consumer's credentials is exported.
@@ -134,20 +134,20 @@ workspace boundary) plus RBAC. The credentials' RBAC *is* the authorization mode
 is no separate permission/claim grant object in core.
 
 **1. A Secret with a kubeconfig** pointing at the provider cluster, living in the
-konnector's designated namespace (default `kube-bind`).
+konnector's designated namespace (default `kbind`).
 
 **2. `Connection`** (cluster-scoped) — the link to one provider. Owns credentials and
 schema delivery, and surfaces what the provider offers:
 
 ```yaml
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.dev/v1alpha1
 kind: Connection
 metadata:
   name: mangodb-provider
 spec:
   # Immutable. The only credential reference in the core.
   kubeconfigSecretRef:
-    namespace: kube-bind
+    namespace: kbind
     name: mangodb-provider
     key: kubeconfig
 
@@ -179,7 +179,7 @@ are referenced by their **CRD name** on the provider (`<plural>.<group>`) — no
 group/version/resource triples to get out of sync with the schema:
 
 ```yaml
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.dev/v1alpha1
 kind: ClusterBinding              # syncs objects of these APIs cluster-wide
 metadata:
   name: mangodb
@@ -215,7 +215,7 @@ status:
 ```
 
 ```yaml
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.dev/v1alpha1
 kind: Binding                     # same spec, but syncs only objects in its own namespace
 metadata:
   name: mangodb
@@ -235,7 +235,7 @@ connection, the `ClusterBinding` wins and the `Binding` gets a per-API condition
 "Bind everything" is `Connection.spec.autoBind: true` — the konnector then maintains a
 managed `ClusterBinding` mirroring `status.exportedAPIs`.
 
-That is the **entire core API**: three kinds plus the Secret. No kube-bind CRDs are
+That is the **entire core API**: three kinds plus the Secret. No kbind CRDs are
 required on the provider; the konnector reads provider CRDs through the ordinary
 apiextensions API and reads/writes instances through the dynamic client.
 
@@ -250,22 +250,22 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: mangodb-provider
-  namespace: kube-bind
+  namespace: kbind
 stringData:
   kubeconfig: |
     <provider kubeconfig>
 ---
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.dev/v1alpha1
 kind: Connection
 metadata:
   name: mangodb-provider
 spec:
   kubeconfigSecretRef:
-    namespace: kube-bind
+    namespace: kbind
     name: mangodb-provider
     key: kubeconfig
 ---
-apiVersion: core.kube-bind.io/v1alpha1
+apiVersion: core.kbind.dev/v1alpha1
 kind: ClusterBinding
 metadata:
   name: mangodb
@@ -325,6 +325,17 @@ falls back to OpenAPI):
   enforcing side (a consumer object that passes locally can still be rejected upstream;
   that surfaces as a per-object sync condition, not silent loss).
 
+  Considered and rejected: closing this gap with a consumer-side **validation webhook**
+  that proxies validation to the provider (e.g. a dry-run apply against the provider at
+  admission time). Admission webhooks require a serving-certificate pair — a
+  cert-manager (or equivalent) dependency — and demand ongoing operational care across
+  the wide range of cluster configurations the konnector must run in; they would break
+  the lightweight, ship-anywhere property of the core. CEL-based
+  `ValidatingAdmissionPolicy` avoids the certificate problem but cannot reach the
+  provider, so it cannot close the gap either (it may later cover the subset of rules
+  that *do* round-trip). The trade-off stands as stated: the provider enforces, the
+  consumer surfaces rejections as conditions.
+
 Binding by CRD name (`<plural>.<group>`) works identically under both sources — it's
 just resource + group; with the OpenAPI source there simply is no CRD object behind the
 name on the provider. `status.exportedAPIs` is computed per source: labeled CRDs for
@@ -338,8 +349,8 @@ name on the provider. `status.exportedAPIs` is computed per source: labeled CRDs
 | Selection | `ClusterBinding` syncs all instances of its listed APIs cluster-wide; namespaced `Binding` syncs only instances in its own namespace. `Connection.spec.autoBind` binds everything exported. |
 | Spec | consumer → provider, server-side apply with a dedicated field manager. |
 | Status | provider → consumer, status subresource update. |
-| Namespaces | If the consumer namespace doesn't exist on the provider, the konnector creates it (annotated as kube-bind-created; only kube-bind-created namespaces are cleaned up on unbind). |
-| Deletion | Finalizer on consumer object (as today); consumer deletion propagates to provider, finalizer released only when the provider copy is fully gone (a provider-side finalizer holds the consumer object in `Terminating` until it clears). `kube-bind.io/deletion-policy: Orphan` on a consumer object releases the finalizer without deleting the provider copy. Provider-side deletion of a synced object is treated as drift and re-created **unless** the provider copy has a non-zero deletionTimestamp — then the konnector waits for it to finalize rather than racing a re-create. Consumer is source of truth for spec. |
+| Namespaces | If the consumer namespace doesn't exist on the provider, the konnector creates it (annotated as kbind-created; only kbind-created namespaces are cleaned up on unbind). |
+| Deletion | Finalizer on consumer object (as today); consumer deletion propagates to provider, finalizer released only when the provider copy is fully gone (a provider-side finalizer holds the consumer object in `Terminating` until it clears). `kbind.dev/deletion-policy: Orphan` on a consumer object releases the finalizer without deleting the provider copy. Provider-side deletion of a synced object is treated as drift and re-created **unless** the provider copy has a non-zero deletionTimestamp — then the konnector waits for it to finalize rather than racing a re-create. Consumer is source of truth for spec. |
 | Schema | Per `Connection.spec.schema`: konnector obtains schemas via `source: CRD` (read apiextensions) or `OpenAPI` (synthesize from discovery + `/openapi/v3` — CRD-less providers like kcp), pulls per `pullPolicy: All` or `Bound`, applies on the consumer (owner-ref to the `Connection`). `updatePolicy: Always` keeps following provider schema changes; `Once` pins. CRDs with `strategy: Webhook` are refused (per-API condition + skip). |
 | Discovery | `Connection.status.exportedAPIs`: labeled CRDs (`source: CRD`) or discovery minus built-ins (`source: OpenAPI`, where the logical-cluster boundary is the export boundary) — core-level discovery with zero provider CRDs. |
 | Related resources | Selected Secrets/ConfigMaps sync in the declared direction, same identity rules, scoped like their binding. They are owned by the **binding** (not by individual instances): an object is synced while it matches the selector and is garbage-collected when it stops matching or the binding is removed. The same ownership markers and `conflictPolicy` apply — a related object already owned by another binding/consumer is a conflict, never silently overwritten. |
@@ -355,8 +366,8 @@ Identity mapping means two writers can legitimately collide. Core rules:
    pins in its status the first time it resolves its credentials — *not* something read
    from a fixed object like the `kube-system` namespace, which does not exist on
    CRD-less/logical-cluster providers (kcp). This keeps the marker well-defined under both
-   schema sources. (Same idea as today's `kube-bind.io/consumer-uid` / `provider-uid`
-   annotations, kept.)
+   schema sources. (Same idea as v1's `kube-bind.io/consumer-uid` / `provider-uid`
+   annotations, carried forward under the new `kbind.dev/*` prefix.)
 2. Before first write, the konnector classifies the existing target object three ways:
    * **No markers** (a foreign, un-owned object): `conflictPolicy: Fail` (default) does
      not touch it; `conflictPolicy: Adopt` stamps markers and SSA force-applies.
@@ -398,7 +409,7 @@ moved into the konnector or out of core:
 * It watches `Connection`, `ClusterBinding`, and `Binding` objects, and only the Secrets
   that `Connection`s reference (fixes the v1 watch-all-secrets issue). A `Connection`'s
   `kubeconfigSecretRef` must resolve to the konnector's own designated namespace (default
-  `kube-bind`): `Connection` is cluster-scoped, so letting it name a Secret in any
+  `kbind`): `Connection` is cluster-scoped, so letting it name a Secret in any
   namespace would let anyone who can create a `Connection` read any Secret the konnector's
   ServiceAccount can. Cross-namespace refs are rejected with `SecretValid=False`.
 * One `Connection` = one provider client/informer context; all bindings referencing it
@@ -409,7 +420,7 @@ moved into the konnector or out of core:
 The honest cost of zero provider-side runtime: credential issuance/rotation and cleanup
 after consumers that disappear forever are nobody's job in core. The Lease per
 `Connection` is the hook — an optional provider-side reaper (service layer) can GC
-kube-bind-created namespaces and synced objects whose Lease has expired.
+kbind-created namespaces and synced objects whose Lease has expired.
 
 Heartbeat keeps the zero-CRD property: the konnector maintains a plain
 `coordination.k8s.io/Lease` per `Connection` in a designated provider namespace.
@@ -485,7 +496,7 @@ becomes "anything that can create a Secret, a `Connection`, and bindings":
 
 | v1 component | v2 home |
 |---|---|
-| backend HTTP API, OIDC, sessions, SPA/UI | optional `kube-bind-backend` component (own module/repo dir, own release cycle). Its output is exactly the core objects. |
+| backend HTTP API, OIDC, sessions, SPA/UI | optional `kbind-backend` component (own module/repo dir, own release cycle). Its output is exactly the core objects. |
 | `kubectl bind` CLI + browser dance | optional `cli/` plugin, talks to the backend, ends by applying the core objects + (optionally) installing the konnector. |
 | `APIServiceExportTemplate`, `Collection` | backend-layer CRDs (rich catalog: descriptions, grouping, permission review). Raw discovery is core (`Connection.status.exportedAPIs`); curation is service layer. |
 | `APIServiceExportRequest`, `BindableResourcesRequest`, `BindingResourceResponse` | backend-layer wire/handshake types. |
@@ -497,14 +508,34 @@ becomes "anything that can create a Secret, a `Connection`, and bindings":
 GitOps is the degenerate case: a human or pipeline commits the one-apply file (Secret +
 `Connection` + bindings), no optional layer at all.
 
+### Every v1 API, dispositioned
+
+Where each `kube-bind.io/v1alpha2` kind lands in v2, in one table:
+
+| v1 API (v1alpha2) | v2 disposition |
+|---|---|
+| `APIServiceBinding` | **Replaced in core** by `Binding` / `ClusterBinding` (`core.kbind.dev`). |
+| `APIServiceBindingBundle` | **Absorbed into core** as `Connection.spec.autoBind: true`. |
+| `ClusterBinding` (provider-side consumer record + heartbeat) | **Dropped.** Heartbeat becomes a plain `coordination.k8s.io/Lease`; richer provider-side visibility may return in the service layer. Note the name reuse: v2's `ClusterBinding` is a different, consumer-side object. |
+| `APIServiceExport` | **Dropped.** Export opt-in is the `core.kbind.dev/exported=true` CRD label (or the logical-cluster boundary on CRD-less providers). |
+| `BoundSchema` | **Dropped.** The konnector reads provider CRDs / OpenAPI directly; no provider-side copy-of-a-CRD object. |
+| `APIServiceNamespace` | **Dropped.** Identity mapping means no namespace re-mapping, ever. |
+| `APIServiceExportRequest` | **Dropped from core.** The handshake becomes the service layer's HTTP protocol ([v2-extended](v2-extended.md)), which terminates in the one-apply bundle — no request/response CRDs on the consumer. |
+| `BindableResourcesRequest` / `BindingResourceResponse` | **Dropped.** Same reason — wire/handshake types become gateway endpoints. |
+| `APIServiceExportTemplate` | **Moves to the service layer** as `catalog.kbind.dev/Export` ([v2-extended](v2-extended.md)). |
+| `Collection` | **Moves to the service layer** as `catalog.kbind.dev/Collection`. |
+
+New in v2 core: `Connection` — no v1 equivalent; the provider link was previously
+implicit in the kubeconfig Secret plus the provider-side `ClusterBinding`. New in the
+service layer: `Grant` (`iam.kbind.dev`), the issuance record.
+
 ### What gets deleted outright
+
+Beyond the dropped kinds above, the machinery around them goes too:
 
 * `Isolation` / `ClusterScopedIsolation` / `informerScope` fields and the
   isolation strategy implementations (`prefixed.go`, `namespaced.go`, `none.go`).
-* `APIServiceNamespace` and the namespace-lifecycle controller.
-* `BoundSchema` (core reads provider CRDs directly; the provider-side copy-of-a-CRD
-  object disappears).
-* `ClusterBinding` from core (possibly resurrected in the backend layer).
+* The namespace-lifecycle controller (served `APIServiceNamespace`).
 * Embedded OIDC, sessions, cookies, SPA from anything called "core".
 * The hardcoded claimable-APIs list (`claimable_apis.go`) — replaced by
   `relatedResources` limited to `secrets`/`configmaps`, label + named selectors only.
@@ -516,9 +547,9 @@ path outside it is v1 by definition — frozen on main, maintained on a release 
 deleted from main at v2 GA.
 
 ```
-kube-bind/
+kbind/
 ├── v2/                              # ── ALL v2 code lives here ──
-│   ├── sdk/                         # Go module: type-only API (core.kube-bind.io)
+│   ├── sdk/                         # Go module: type-only API (core.kbind.dev)
 │   │   └── apis/core/v1alpha1/      #   Connection, ClusterBinding, Binding
 │   ├── konnector/                   # Go module: the slim core engine + binary
 │   │   ├── cmd/konnector/
@@ -541,12 +572,12 @@ Rules:
   API without pulling the engine; `v2/konnector` depends on `v2/sdk`, never vice versa.
 * Within v2, optional layers (`v2/backend`, `v2/cli`) depend on `v2/sdk` (and at most
   the konnector's library surface), never the other way.
-* The v2 konnector binary serves **only** `core.kube-bind.io`. v1alpha2 konnector is
+* The v2 konnector binary serves **only** `core.kbind.dev`. v1alpha2 konnector is
   maintained on the release branch until deprecation; no dual-stack binary.
 * Engine implementation: built on multicluster-runtime (see
   [Engine](#engine-built-on-multicluster-runtime)); one shared informer set per provider
   connection, no hand-rolled informer plumbing.
-* Images follow the same rule: `ghcr.io/kube-bind/konnector:v2.*` is built from
+* Images follow the same rule: `ghcr.io/kbind-dev/konnector:v2.*` is built from
   `v2/konnector`; `v1.*` / `v0.*` tags only ever come from the release branch.
 
 ## Migration
@@ -564,14 +595,17 @@ Rules:
 * **One apply**: a complete e2e binding is a single `kubectl apply -f` of one file
   (Secret + `Connection` + bindings); all core objects are order-independent and
   level-triggered — missing references are `Pending` conditions, never errors.
-* **Naming**: group `core.kube-bind.io`, kinds `Connection`, `ClusterBinding`, `Binding`.
+* **Naming**: the project is **kbind** (formerly kube-bind; org `kbind-dev`, domain
+  `kbind.dev`). All new v2 API groups live under the new domain: group `core.kbind.dev`,
+  kinds `Connection`, `ClusterBinding`, `Binding` (service layer: `catalog.kbind.dev`,
+  `iam.kbind.dev`). v1 groups (`kube-bind.io/v1alpha2`) are untouched on the frozen side.
   The agent stays **konnector**.
 * **Binding shape & scope**: a binding lists one or more CRD names (`spec.apis`) plus
   its related resources; cluster-wide vs per-namespace is expressed by kind
   (`ClusterBinding`/`Binding`), not by fields.
 * **Bind everything**: `Connection.spec.autoBind: true` — konnector maintains a managed
   `ClusterBinding` mirroring `status.exportedAPIs`. Replaces `APIServiceBindingBundle`.
-* **Discovery**: provider opt-in via `core.kube-bind.io/exported=true` CRD label on
+* **Discovery**: provider opt-in via `core.kbind.dev/exported=true` CRD label on
   plain Kubernetes; on CRD-less providers (kcp, kcp-like) the logical-cluster boundary
   is the export boundary (discovery minus built-ins). Exported APIs surfaced on
   `Connection.status.exportedAPIs`. No catalog CRDs in core.
@@ -601,14 +635,14 @@ Rules:
   drains object finalizers before finalizing (`DrainingObjects`); `deletion-policy:
   Orphan` opts an object out of provider-side deletion.
 * **Provider namespaces**: konnector creates missing namespaces iff RBAC allows
-  (annotated kube-bind-created, cleaned up on unbind); otherwise condition + wait.
+  (annotated kbind-created, cleaned up on unbind); otherwise condition + wait.
 * **Heartbeat**: a plain `coordination.k8s.io/Lease` per Connection, maintained by the
-  konnector in a designated provider namespace. Still zero kube-bind CRDs on the
+  konnector in a designated provider namespace. Still zero kbind CRDs on the
   provider.
 * **Mapper**: identity only in-tree; compile-time interface for out-of-tree key mapping;
   scope conversion impossible by construction.
 * **Topology**: consumer-side pull; the konnector is the **only running component** in
-  the core — no backend required. Provider needs zero kube-bind CRDs, controllers, or
+  the core — no backend required. Provider needs zero kbind CRDs, controllers, or
   processes. Provider-side credential lifecycle and dead-consumer GC are service-layer
   jobs (keyed off the Lease).
 * **Engine**: built on multicluster-runtime as a bridge between two cluster sets — a
@@ -623,7 +657,7 @@ Rules:
   version. `v2/sdk` (types) + `v2/konnector` (engine) as separate Go modules; no imports
   across the v1/v2 boundary in either direction (CI-enforced); v1 paths frozen on main
   and deleted at v2 GA.
-* **Dual-stack**: none. v2 konnector serves only `core.kube-bind.io`; the v1alpha2
+* **Dual-stack**: none. v2 konnector serves only `core.kbind.dev`; the v1alpha2
   konnector is maintained on a release branch until deprecation.
 * **Backend/UI/CLI redesign**: separate follow-up proposal; this doc only fixes the
   contract boundary.

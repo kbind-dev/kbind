@@ -1,4 +1,4 @@
-# kube-bind v2 Extended: Backend API, CLI, UI
+# kbind v2 Extended: Backend API, CLI, UI
 
 * Status: **DRAFT — for iteration**
 * Authors: @mjudeikis
@@ -8,7 +8,7 @@
 ## Summary
 
 The v2 core contract is up for discussion: a binding is one `kubectl apply` of a Secret +
-`Connection` + bindings, consumed by the konnector, with zero kube-bind components on
+`Connection` + bindings, consumed by the konnector, with zero kbind components on
 the provider. This proposal designs everything *around* that contract — the optional
 service layer that answers the questions the core deliberately doesn't:
 
@@ -64,11 +64,11 @@ Raw discovery already exists in core (`Connection.status.exportedAPIs` from labe
 CRDs / the workspace boundary). The catalog adds **curation**: human-facing metadata
 and sensible defaults that turn "a list of CRD names" into "a service you'd choose".
 
-Group: `catalog.kube-bind.io`. Two kinds, successors of v1's
+Group: `catalog.kbind.dev`. Two kinds, successors of v1's
 `APIServiceExportTemplate` and `Collection`:
 
 ```yaml
-apiVersion: catalog.kube-bind.io/v1alpha1
+apiVersion: catalog.kbind.dev/v1alpha1
 kind: Export                          # one offering
 metadata:
   name: mangodb
@@ -93,7 +93,7 @@ spec:
 ```
 
 ```yaml
-apiVersion: catalog.kube-bind.io/v1alpha1
+apiVersion: catalog.kbind.dev/v1alpha1
 kind: Collection                      # grouping for UI/CLI browsing
 metadata:
   name: databases
@@ -135,7 +135,7 @@ distribution, which wires its own implementation against the same interface.
   revisitable without API change (the bundle's Secret is replaceable; a bounded-token +
   reissue mode can be added later behind the same interface). Revocation = delete the
   `Grant` → issuer deletes the SA/token.
-* Records issuance in **`Grant`** (`iam.kube-bind.io` — an issuance/identity record, not
+* Records issuance in **`Grant`** (`iam.kbind.dev` — an issuance/identity record, not
   catalog presentation): "identity X was issued credentials Y for export Z". The anchor
   for revocation, audit, and the reaper.
 
@@ -195,7 +195,7 @@ equivalent), so the reaper ships only once the konnector actually maintains the 
 until then dead-consumer GC is manual.
 
 * Lease expired beyond TTL → mark the issuance stale → (configurably) revoke
-  credentials, then delete kube-bind-created namespaces and synced objects.
+  credentials, then delete kbind-created namespaces and synced objects.
 * TTLs and the destructive step are opt-in and conservative by default (revoke ≠
   delete; deletion requires explicit enablement).
 
@@ -206,12 +206,15 @@ Thin client over the gateway; everything it does is reproducible by hand:
 ```sh
 kubectl bind login https://mangodb.example.com        # auth, cache token
 kubectl bind catalog                                  # list Exports/Collections
-kubectl bind mangodb                                  # bind an Export:
+kubectl bind export mangodb                           # bind an Export:
                                                       #   POST /api/bind → bundle
                                                       #   → kubectl apply (or -o yaml)
-kubectl bind mangodb -o yaml > binding.yaml           # GitOps mode: print, don't apply
+kubectl bind export mangodb -o yaml > binding.yaml    # GitOps mode: print, don't apply
 ```
 
+* Every CLI action is an explicit subcommand (`login`, `catalog`, `export`); export
+  names never occupy the subcommand slot — `kubectl bind export mangodb`, not
+  `kubectl bind mangodb` — so command names and export names cannot collide.
 * `--install-konnector` (default on for interactive use) installs/upgrades the v2
   konnector, as v1 did.
 * The CLI never creates bespoke objects — it applies the gateway's bundle verbatim.
@@ -223,8 +226,8 @@ kubectl bind mangodb -o yaml > binding.yaml           # GitOps mode: print, don'
 
 Browse catalog → authenticate → bind → then either:
 
-* **download the bundle** (via the one-time pickup URL) / copy a `kubectl bind`
-  one-liner, or
+* **download the bundle** (via the one-time pickup URL) / copy a
+  `kubectl bind export` one-liner, or
 * **browser-apply** (v1's UI-only flow, roadmap #406, kept): the user supplies a
   consumer-cluster kubeconfig (or the UI runs in-platform where one is already held),
   and the gateway's `/api/apply` applies the bundle and installs the konnector into the
@@ -253,11 +256,11 @@ remains separate, providing its own issuer implementation behind the same interf
 
 ## Decided
 
-* **Packaging**: one `kube-bind-backend` binary; gateway/issuer/reaper/apply are module
+* **Packaging**: one `kbind-backend` binary; gateway/issuer/reaper/apply are module
   flags, boundaries kept as Go packages.
-* **Issuance anchor**: `Grant` in `iam.kube-bind.io` — the typed record of
+* **Issuance anchor**: `Grant` in `iam.kbind.dev` — the typed record of
   "identity X was issued credentials Y for export Z"; anchor for revocation, audit,
-  reaper. Kept out of `catalog.kube-bind.io` so that group stays purely presentation+defaults.
+  reaper. Kept out of `catalog.kbind.dev` so that group stays purely presentation+defaults.
 * **Credentials**: long-lived secret-based SA token (v1 behavior) — zero rotation
   friction accepted over security posture; revocation via `Grant` deletion; bounded
   tokens addable later behind the same issuer interface without API change.
@@ -273,6 +276,9 @@ remains separate, providing its own issuer implementation behind the same interf
   is an explicitly accepted trade-off when enabled.
 * **Federation**: one gateway = one provider; cross-provider aggregation is a future
   layer above the bundle protocol.
+* **CLI verb structure**: every action is an explicit subcommand; binding an export is
+  `kubectl bind export <name>`, never a bare `kubectl bind <name>` — export names and
+  command names must not share a namespace (review feedback, @sttts).
 
 ## Open questions
 
