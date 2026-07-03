@@ -43,7 +43,7 @@ krews:
   ids:
   - kubectl-bind
   repository:
-    owner: kube-bind
+    owner: kbind-dev
     name: krew-index
     token: "{{ .Env.KREW_GITHUB_TOKEN }}"
   homepage: "https://kube-bind.io/"

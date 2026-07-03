@@ -7,7 +7,7 @@ A Helm chart for kube-bind backend deployment
 ## Installation
 
 ```bash
-helm install kube-bind-backend oci://ghcr.io/kube-bind/charts/backend --version <version>
+helm install kube-bind-backend oci://ghcr.io/kbind-dev/charts/backend --version <version>
 ```
 
 ## Configuration
@@ -35,7 +35,7 @@ See [values.yaml](values.yaml) for the full list of configurable parameters.
 | backend.extraArgs | list | `[]` | Extra command-line arguments to pass to the backend |
 | backend.frontendDisabled | bool | `false` | Disable the frontend UI |
 | backend.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
-| backend.image.repository | string | `"ghcr.io/kube-bind/backend"` | Image repository |
+| backend.image.repository | string | `"ghcr.io/kbind-dev/backend"` | Image repository |
 | backend.image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion |
 | backend.kubeconfig | string | `""` | Path to a kubeconfig file. Only required if out-of-cluster. |
 | backend.listenAddress | string | `"0.0.0.0:8080"` | Address the backend listens on |

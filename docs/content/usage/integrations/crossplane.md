@@ -392,7 +392,7 @@ Waiting for binding completion from UI...
 
 Binding completed successfully!
 🔒 Updated secret kube-bind/kubeconfig-zxrdn for host https://kube-bind.example.com, namespace kube-bind-bp52k
-🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kube-bind/konnector:v0.6.0".
+🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kbind-dev/konnector:v0.6.0".
 ✅ Created APIServiceBinding mysqldatabase-6rvjt for 1 resources
 Created 1 APIServiceBinding(s):
   - mysqldatabase-6rvjt

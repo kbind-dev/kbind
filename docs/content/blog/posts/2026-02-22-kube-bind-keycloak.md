@@ -317,7 +317,7 @@ helm upgrade --install kube-bind \
     --set backend.oidc.clientSecret=cSmfhB3RNuetE8pgz1hDVjDHsDpc2r2v\
     --set backend.oidc.callbackUrl=http://kube-bind.local:8080/api/callback \
     --set backend.oidc.allowedGroups={kube-bind-users} \
-    oci://ghcr.io/kube-bind/charts/backend --version 0.7.1
+    oci://ghcr.io/kbind-dev/charts/backend --version 0.7.1
 ```
 
 Replace `<YOUR-CLIENT-SECRET>` with what you copied from the Keycloak credentials tab.

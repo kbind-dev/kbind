@@ -17,7 +17,7 @@
 set -o nounset
 set -o pipefail
 
-DEFAULT_KONNECTOR_IMAGE="ghcr.io/kube-bind/konnector:v0.4.6"
+DEFAULT_KONNECTOR_IMAGE="ghcr.io/kbind-dev/konnector:v0.4.6"
 
 if [[ -z "${HOST_IP:-}" ]]; then
   source "$(dirname "$0")/host-ip.sh"

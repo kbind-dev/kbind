@@ -108,7 +108,7 @@ Waiting for binding completion from UI...
 Binding completed successfully!
 Created kube-bind namespace.
 🔒 Created secret kube-bind/kubeconfig-p6mfh for host https://api.kcp-prod.kcp.internal.canary.k8s.ondemand.com:443, namespace kube-bind-dkxkx
-🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kube-bind/konnector:v0.6.0-rc1".
+🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kbind-dev/konnector:v0.6.0-rc1".
    Waiting for the ...................
 ✅ Created APIServiceBinding certificate for 1 resources
 Created 1 APIServiceBinding(s):

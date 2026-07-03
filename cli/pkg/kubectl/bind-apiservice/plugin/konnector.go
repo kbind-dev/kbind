@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	konnectorImage = "ghcr.io/kube-bind/konnector"
+	konnectorImage = "ghcr.io/kbind-dev/konnector"
 )
 
 // DeployKonnector deploys the konnector to the cluster.

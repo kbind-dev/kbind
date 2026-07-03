@@ -18,7 +18,7 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-DEFAULT_EXAMPLE_BACKEND_IMAGE="ghcr.io/kube-bind/backend:v0.5.0"
+DEFAULT_EXAMPLE_BACKEND_IMAGE="ghcr.io/kbind-dev/backend:v0.5.0"
 
 if [[ -z "${HOST_IP:-}" ]]; then
   source "$(dirname "$0")/host-ip.sh"

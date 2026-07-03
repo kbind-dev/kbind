@@ -28,7 +28,7 @@ helm upgrade \
     --install \
     --namespace kube-bind \
     --create-namespace \
-    kube-bind oci://ghcr.io/kube-bind/charts/backend --version 0.0.0-a50df39d7e4c71f7808f4209ec23f294c5ac8f86
+    kube-bind oci://ghcr.io/kbind-dev/charts/backend --version 0.0.0-a50df39d7e4c71f7808f4209ec23f294c5ac8f86
 
 helm upgrade \
     --install \

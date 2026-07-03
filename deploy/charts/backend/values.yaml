@@ -10,7 +10,7 @@ backend:
   # Container image configuration
   image:
     # -- Image repository
-    repository: ghcr.io/kube-bind/backend
+    repository: ghcr.io/kbind-dev/backend
     # -- Image pull policy
     pullPolicy: IfNotPresent
     # -- Overrides the image tag whose default is the chart appVersion

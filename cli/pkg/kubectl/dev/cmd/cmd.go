@@ -98,7 +98,7 @@ func newCreateCommand(streams genericclioptions.IOStreams) (*cobra.Command, erro
 
 		The backend chart can be sourced from:
 
-		- OCI registry (default): oci://ghcr.io/kube-bind/charts/backend
+		- OCI registry (default): oci://ghcr.io/kbind-dev/charts/backend
 		- Local filesystem: --chart-path ./deploy/charts/backend
 		- Custom OCI registry: --chart-path oci://custom.registry/charts/backend
 		`),

@@ -66,7 +66,7 @@ helm upgrade \
       --set gatewayApi.route.path=/ \
       --set gatewayApi.route.pathType=PathPrefix \
       --set image.tag=v${VERSION} \
-      kube-bind oci://ghcr.io/kube-bind/charts/backend --version ${VERSION}
+      kube-bind oci://ghcr.io/kbind-dev/charts/backend --version ${VERSION}
 ```
 
 4. **Seed with example resources (optional):**
@@ -294,7 +294,7 @@ kube-bind Helm charts are published as OCI images to GitHub Container Registry:
 
 ### Backend Chart
 
-- **Registry**: `oci://ghcr.io/kube-bind/charts/backend`
+- **Registry**: `oci://ghcr.io/kbind-dev/charts/backend`
 - **Latest Release**: Use the latest tag version (e.g., `1.0.0`)
 - **Development Builds**: Available as `0.0.0-<git-sha>` format for each commit to main
 

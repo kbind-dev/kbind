@@ -279,7 +279,7 @@ Waiting for binding completion from UI...
   (Press Ctrl+C to cancel)
 Binding completed successfully!
 🔒 Updated secret kube-bind/kubeconfig-zdrdn for host https://kube-bind.dev.local, namespace kube-bind-wz2g5
-🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kube-bind/konnector:v0.6.0".
+🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kbind-dev/konnector:v0.6.0".
 ✅ Created APIServiceBinding loadbalancer for 1 resources
 Created 1 APIServiceBinding(s):
   - loadbalancer
