@@ -60,3 +60,20 @@ jobs:
           --platform linux/amd64,linux/arm64 \
           --provenance=false \
           .
+
+  e2e-kind:
+    name: e2e-kind
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    # kubectl and docker are preinstalled on ubuntu-latest; pin kind and helm via
+    # direct downloads to keep the toolchain reproducible without extra actions.
+    - name: Install kind and helm
+      run: |
+        curl -fsSLo ./kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+        chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+        curl -fsSL https://get.helm.sh/helm-v3.17.1-linux-amd64.tar.gz | tar -xz
+        sudo mv linux-amd64/helm /usr/local/bin/helm
+    # Builds the image, loads it into a kind consumer cluster, helm-installs the
+    # konnector, and asserts the full bind/sync flow against a kind provider.
+    - run: make test-e2e-kind

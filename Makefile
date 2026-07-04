@@ -71,6 +71,13 @@ test-e2e:
 	KUBEBUILDER_ASSETS="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 		go test ./test/e2e/... -count=1 -timeout 600s
 
+# Full kind-based e2e: build the image, load it into kind, helm-install the
+# konnector, and assert the bind/sync flow end to end. Pass KEEP=1 to leave the
+# clusters running, NO_BUILD=1 to reuse an already-loaded image.
+.PHONY: test-e2e-kind
+test-e2e-kind:
+	IMAGE=$(IMAGE) ./hack/e2e.sh
+
 .PHONY: vet
 vet:
 	go vet ./...

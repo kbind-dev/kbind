@@ -23,7 +23,7 @@ PROVIDER=kbind-provider
 CONSUMER=kbind-consumer
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2="$(cd "${HERE}/.." && pwd)"
-SAMPLES="${V2}/konnector/config/samples"
+SAMPLES="${V2}/config/samples"
 PROVIDER_KC=/tmp/${PROVIDER}.kubeconfig
 CONSUMER_KC=/tmp/${CONSUMER}.kubeconfig
 
@@ -59,7 +59,7 @@ cat <<EOF
 ================================================================================
 Demo wired. Now run the konnector against the consumer cluster:
 
-  cd ${V2}/konnector
+  cd ${V2}
   KUBECONFIG=${CONSUMER_KC} go run ./cmd/konnector
 
 Then, in another terminal, watch it work:
