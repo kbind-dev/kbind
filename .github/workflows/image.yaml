@@ -1,14 +1,12 @@
 name: Image
 
-# Build and push the konnector image. Pushes on:
-#   - tags v*        -> ghcr.io/<owner>/konnector:<version>, :latest, :<sha>
-#   - branch main    -> ghcr.io/<owner>/konnector:latest, :<sha>
+# Build and push the konnector image. Pushes only on tags:
+#   - tags v* -> ghcr.io/<owner>/konnector:<version>
+# No :latest or :<sha> tags — the image repo is shared with v1/main images.
 on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -25,10 +23,7 @@ jobs:
       run: |
         owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
         image="ghcr.io/${owner}/konnector"
-        tags="${image}:latest ${image}:${{ github.sha }}"
-        if [[ "${{ github.ref_type }}" == "tag" ]]; then
-          tags="${image}:${GITHUB_REF_NAME} ${tags}"
-        fi
+        tags="${image}:${GITHUB_REF_NAME}"
         {
           echo "image=${image}"
           echo "tags=${tags}"
