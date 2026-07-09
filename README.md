@@ -1,6 +1,5 @@
 <img alt="Logo" width="196px" style="margin-right: 30px;" align="left" src="./docs/images/logo.png"></img>
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/kbind-dev/kbind)](https://goreportcard.com/report/github.com/kbind-dev/kbind)
 [![GitHub](https://img.shields.io/github/license/kbind-dev/kbind)](https://github.com/kbind-dev/kbind/blob/main/LICENSE)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/kbind-dev/kbind?sort=semver)](https://github.com/kbind-dev/kbind/releases/latest)
 
