@@ -114,8 +114,11 @@ type APIServiceExportRequestSpec struct {
 	// Access is granted per GroupResource.
 	//
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="permissionClaims are immutable"
+	// +kubebuilder:validation:XListType=map
+	// +kubebuilder:validation:XListMapKey=resource
+	// +kubebuilder:validation:XListMapKey=group
+	// +kubebuilder:validation:XValidation:rule="self.all(c, (c.group == '' && c.resource == 'configmaps') || (c.group == '' && c.resource == 'secrets') || (c.group == '' && c.resource == 'serviceaccounts'))",message="Resource is not a valid claimable API"
 	PermissionClaims []PermissionClaim `json:"permissionClaims,omitempty"`
-
 	// namespaces specifies the namespaces to bootstrap as part of this request.
 	// When objects originate from provider side, the consumer does not always know the necessary details.
 	// This field allows provider to pre-heat the necessary namespaces on provider side by creating
