@@ -53,6 +53,14 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+# Host aliases injected into /etc/hosts.
+# Needed when circumventing local DNS (e.g. local setup).
+hostAliases: []
+# Example:
+# - ip: "1.2.3.4"
+#   hostnames:
+#     - kcp.api.portal.localhost
+
 podAnnotations: {}
 podLabels: {}
 
