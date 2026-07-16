@@ -88,6 +88,19 @@ type APIServiceBindingSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="kubeconfigSecretRef is immutable"
 	KubeconfigSecretRef ClusterSecretKeyRef `json:"kubeconfigSecretRef"`
+
+	// providerID is a stable and unique identifier for the provider cluster.
+	//
+	// +optional
+	// +kubebuilder:validation:Optional
+	ProviderID string `json:"providerID,omitempty"`
+
+	// isDefault indicates whether this binding should be used as the default routing
+	// destination for Custom Resources that do not specify a provider annotation.
+	//
+	// +optional
+	// +kubebuilder:validation:Optional
+	IsDefault bool `json:"isDefault,omitempty"`
 }
 
 type APIServiceBindingStatus struct {

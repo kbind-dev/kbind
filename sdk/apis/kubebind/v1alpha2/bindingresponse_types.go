@@ -64,6 +64,12 @@ type BindingResourceResponse struct {
 	// +kubebuilder:validation:Optional
 	ProviderNamespace string `json:"providerNamespace,omitempty"`
 
+	// providerID is a stable and unique identifier for the provider cluster.
+	//
+	// +optional
+	// +kubebuilder:validation:Optional
+	ProviderID string `json:"providerID,omitempty"`
+
 	// bindingName is the confirmed name for this binding, as created on the service
 	// provider cluster.
 	//
