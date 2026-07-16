@@ -61,6 +61,7 @@ See [values.yaml](values.yaml) for the full list of configurable parameters.
 | backend.tls.tlsKeyFile | string | `"/etc/kube-bind/tls/tls.key"` | Path to TLS key file inside the container |
 | certManager.clusterIssuer | string | `""` | Name of the ClusterIssuer to use |
 | certManager.enabled | bool | `false` | Enable cert-manager integration for automatic TLS certificates |
+| crds.install | bool | `true` | Install CustomResourceDefinitions |
 | examples.enabled | bool | `false` | Enable example resources to seed on first start |
 | fullnameOverride | string | `""` | Override the full release name |
 | gatewayApi.enabled | bool | `false` | Enable Gateway API resources |
