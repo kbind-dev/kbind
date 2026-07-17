@@ -65,10 +65,6 @@ func NewBinder(config *rest.Config, opts *BinderOptions) *Binder {
 	}
 }
 
-// TODO: bindFromFile and bindFromResponse can likely share a lot of code. This slow is bit repetitive
-// but keeps the two paths separate for clarity. But it needs love.
-// https://github.com/kube-bind/kube-bind/issues/360
-
 func (b *Binder) BindFromFile(ctx context.Context) ([]*kubebindv1alpha2.APIServiceBinding, error) {
 	// Generate the kubectl command that would be equivalent
 	remoteFlags := ""
@@ -81,52 +77,17 @@ func (b *Binder) BindFromFile(ctx context.Context) ([]*kubebindv1alpha2.APIServi
 	fmt.Fprintf(b.opts.IOStreams.ErrOut, "✨ Use \"-o yaml\" and \"--dry-run\" to get the APIServiceExportRequest.\n")
 	fmt.Fprintf(b.opts.IOStreams.ErrOut, "    and pass it to \"kubectl bind apiservice\" directly. Great for automation.\n")
 
-	// Ensure client side namespace exists
-	err := b.ensureClientSideNamespaceExists(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ensure kube-bind namespace exists: %w", err)
-	}
-
 	remoteKubeconfig, _, _, err := b.getRemoteKubeconfig(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
 
-	// Copy kubeconfig into local cluster
-	remoteHost, remoteNamespace, err := base.ParseRemoteKubeconfig([]byte(remoteKubeconfig))
+	remoteKubeconfigResolved, remoteNamespaceActual, remoteConfig, err := b.setupEnvironment(ctx, []byte(remoteKubeconfig))
 	if err != nil {
 		return nil, err
 	}
-
-	kubeClient, err := kubeclient.NewForConfig(b.config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kube client: %w", err)
-	}
-
-	secretName, err := base.FindRemoteKubeconfig(ctx, kubeClient, remoteNamespace, remoteHost)
-	if err != nil {
-		return nil, err
-	}
-
-	secret, created, err := base.EnsureKubeconfigSecret(ctx, remoteKubeconfig, secretName, kubeClient)
-	if err != nil {
-		return nil, err
-	}
-
-	if created {
-		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Created secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
-	} else {
-		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Updated secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
-	}
-
 	if b.opts.DryRun {
 		return nil, nil
-	}
-
-	// Get remote kubeconfig
-	remoteKubeconfig, remoteNamespaceActual, remoteConfig, err := b.getRemoteKubeconfig(ctx, secret.Namespace, secret.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get remote kubeconfig: %w", err)
 	}
 
 	data, err := b.getRequestManifest()
@@ -139,77 +100,20 @@ func (b *Binder) BindFromFile(ctx context.Context) ([]*kubebindv1alpha2.APIServi
 		return nil, fmt.Errorf("failed to unmarshal request manifest: %w", err)
 	}
 
-	// Deploy konnector if needed
-	if err := b.deployKonnector(ctx); err != nil {
-		return nil, fmt.Errorf("failed to deploy konnector: %w", err)
-	}
-
-	// Create bindings for all requests
-	result, err := b.createServiceExportRequest(ctx, remoteConfig, remoteNamespaceActual, request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create service export request: %w", err)
-	}
-
-	secretName, err = b.createKubeconfigSecret(ctx, remoteConfig.Host, remoteNamespaceActual, remoteKubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubeconfig secret: %w", err)
-	}
-
-	results, err := b.createAPIServiceBindings(ctx, result, secretName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create API service bindings: %w", err)
-	}
-
-	return results, nil
+	return b.processRequests(ctx, []*kubebindv1alpha2.APIServiceExportRequest{request}, remoteConfig, remoteNamespaceActual, remoteKubeconfigResolved)
 }
-
 // BindFromResponse processes a BindingResourceResponse and creates all necessary bindings
 func (b *Binder) BindFromResponse(ctx context.Context, response *kubebindv1alpha2.BindingResourceResponse) ([]*kubebindv1alpha2.APIServiceBinding, error) {
 	if response == nil || response.Authentication.OAuth2CodeGrant == nil {
 		return nil, fmt.Errorf("unexpected response: authentication.oauth2CodeGrant is nil")
 	}
 
-	// Ensure client side namespace exists
-	err := b.ensureClientSideNamespaceExists(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ensure kube-bind namespace exists: %w", err)
-	}
-
-	// Copy kubeconfig into local cluster
-	remoteHost, remoteNamespace, err := base.ParseRemoteKubeconfig(response.Kubeconfig)
+	remoteKubeconfigResolved, remoteNamespaceActual, remoteConfig, err := b.setupEnvironment(ctx, response.Kubeconfig)
 	if err != nil {
 		return nil, err
 	}
-
-	kubeClient, err := kubeclient.NewForConfig(b.config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kube client: %w", err)
-	}
-
-	secretName, err := base.FindRemoteKubeconfig(ctx, kubeClient, remoteNamespace, remoteHost)
-	if err != nil {
-		return nil, err
-	}
-
-	secret, created, err := base.EnsureKubeconfigSecret(ctx, string(response.Kubeconfig), secretName, kubeClient)
-	if err != nil {
-		return nil, err
-	}
-
-	if created {
-		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Created secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
-	} else {
-		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Updated secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
-	}
-
 	if b.opts.DryRun {
 		return nil, nil
-	}
-
-	// Get remote kubeconfig
-	remoteKubeconfig, remoteNamespaceActual, remoteConfig, err := b.getRemoteKubeconfig(ctx, secret.Namespace, secret.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get remote kubeconfig: %w", err)
 	}
 
 	// Extract the requests
@@ -229,6 +133,57 @@ func (b *Binder) BindFromResponse(ctx context.Context, response *kubebindv1alpha
 		apiRequests[i] = &apiRequest
 	}
 
+	return b.processRequests(ctx, apiRequests, remoteConfig, remoteNamespaceActual, remoteKubeconfigResolved)
+}
+
+func (b *Binder) setupEnvironment(ctx context.Context, remoteKubeconfigBytes []byte) (string, string, *rest.Config, error) {
+	// Ensure client side namespace exists
+	err := b.ensureClientSideNamespaceExists(ctx)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to ensure kube-bind namespace exists: %w", err)
+	}
+
+	// Copy kubeconfig into local cluster
+	remoteHost, remoteNamespace, err := base.ParseRemoteKubeconfig(remoteKubeconfigBytes)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	kubeClient, err := kubeclient.NewForConfig(b.config)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to create kube client: %w", err)
+	}
+
+	secretName, err := base.FindRemoteKubeconfig(ctx, kubeClient, remoteNamespace, remoteHost)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	secret, created, err := base.EnsureKubeconfigSecret(ctx, string(remoteKubeconfigBytes), secretName, kubeClient)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	if created {
+		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Created secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
+	} else {
+		fmt.Fprintf(b.opts.IOStreams.ErrOut, "🔒 Updated secret %s/%s for host %s, namespace %s\n", "kube-bind", secret.Name, remoteHost, remoteNamespace)
+	}
+
+	if b.opts.DryRun {
+		return "", "", nil, nil
+	}
+
+	// Get remote kubeconfig
+	remoteKubeconfig, remoteNamespaceActual, remoteConfig, err := b.getRemoteKubeconfig(ctx, secret.Namespace, secret.Name)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to get remote kubeconfig: %w", err)
+	}
+
+	return remoteKubeconfig, remoteNamespaceActual, remoteConfig, nil
+}
+
+func (b *Binder) processRequests(ctx context.Context, apiRequests []*kubebindv1alpha2.APIServiceExportRequest, remoteConfig *rest.Config, remoteNamespaceActual string, remoteKubeconfig string) ([]*kubebindv1alpha2.APIServiceBinding, error) {
 	// Deploy konnector if needed
 	if err := b.deployKonnector(ctx); err != nil {
 		return nil, fmt.Errorf("failed to deploy konnector: %w", err)
