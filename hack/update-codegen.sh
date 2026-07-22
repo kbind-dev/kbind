@@ -38,7 +38,17 @@ YAML_PATCH="$(UGET_PRINT_PATH=absolute make --no-print-directory install-yaml-pa
       rbac:roleName=manager-role \
       webhook \
       paths="./..." \
-      output:crd:artifacts:config=../../deploy/charts/backend/crds
+      output:crd:artifacts:config=../../deploy/charts/backend/templates/crds
+
+   # Wrap generated CRDs in helm conditional
+   for CRD in ../../deploy/charts/backend/templates/crds/*.yaml; do
+      if [ -f "$CRD" ]; then
+         echo '{{- if .Values.crds.install }}' > "${CRD}.tmp"
+         cat "${CRD}" >> "${CRD}.tmp"
+         echo '{{- end }}' >> "${CRD}.tmp"
+         mv "${CRD}.tmp" "${CRD}"
+      fi
+   done
 
    # Generate RBAC manifests for Helm chart from backend controllers
    "$CONTROLLER_GEN" \
