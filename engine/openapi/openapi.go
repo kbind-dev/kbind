@@ -25,11 +25,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8sversion "k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 )
@@ -51,19 +53,35 @@ func isBuiltinGroup(group string) bool {
 	return builtinGroups[group] || strings.HasSuffix(group, ".k8s.io") || group == "apiregistration.k8s.io"
 }
 
+// crdVersionInfo holds the per-version data collected during discovery.
+type crdVersionInfo struct {
+	gv        schema.GroupVersion
+	resource  metav1.APIResource
+	hasStatus bool
+	props     *apiextensionsv1.JSONSchemaProps
+}
+
 // SynthesizeCRDs discovers every served, non-built-in API on the provider and
 // synthesizes a consumer-installable CRD for each from its /openapi/v3 schema.
+// All discovered versions of a group-resource are merged into a single CRD;
+// the preferred version (per discovery) is marked as the storage version.
 func SynthesizeCRDs(ctx context.Context, cfg *rest.Config) ([]*apiextensionsv1.CustomResourceDefinition, error) {
 	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	_, resourceLists, err := dc.ServerGroupsAndResources()
+	apiGroups, resourceLists, err := dc.ServerGroupsAndResources()
 	if err != nil {
 		// Partial discovery (an aggregated API may be down) is tolerable.
 		if len(resourceLists) == 0 {
 			return nil, fmt.Errorf("discovery: %w", err)
 		}
+	}
+
+	// Build preferred-version map (group → preferred version name) from discovery.
+	preferredVersion := make(map[string]string, len(apiGroups))
+	for _, g := range apiGroups {
+		preferredVersion[g.Name] = g.PreferredVersion.Version
 	}
 
 	root := dc.OpenAPIV3()
@@ -72,14 +90,14 @@ func SynthesizeCRDs(ctx context.Context, cfg *rest.Config) ([]*apiextensionsv1.C
 		return nil, fmt.Errorf("openapi v3 paths: %w", err)
 	}
 
-	var out []*apiextensionsv1.CustomResourceDefinition
+	// Collect all versions per group-resource before building CRDs.
+	versionsForGR := map[schema.GroupResource][]crdVersionInfo{}
 	for _, rl := range resourceLists {
 		gv, err := schema.ParseGroupVersion(rl.GroupVersion)
 		if err != nil || isBuiltinGroup(gv.Group) {
 			continue
 		}
 
-		// Which resources have a status subresource (discovery lists "<r>/status").
 		hasStatus := map[string]bool{}
 		for _, r := range rl.APIResources {
 			if base, sub, ok := strings.Cut(r.Name, "/"); ok && sub == "status" {
@@ -105,10 +123,91 @@ func SynthesizeCRDs(ctx context.Context, cfg *rest.Config) ([]*apiextensionsv1.C
 			if err != nil {
 				continue // no usable schema; skip this resource
 			}
-			out = append(out, buildCRD(gv, r, hasStatus[r.Name], props))
+			gr := schema.GroupResource{Group: gv.Group, Resource: r.Name}
+			versionsForGR[gr] = append(versionsForGR[gr], crdVersionInfo{
+				gv:        gv,
+				resource:  r,
+				hasStatus: hasStatus[r.Name],
+				props:     props,
+			})
 		}
 	}
+
+	out := make([]*apiextensionsv1.CustomResourceDefinition, 0, len(versionsForGR))
+	for gr, versions := range versionsForGR {
+		out = append(out, buildCRD(gr, versions, preferredVersion[gr.Group]))
+	}
 	return out, nil
+}
+
+func buildCRD(gr schema.GroupResource, versions []crdVersionInfo, preferredVer string) *apiextensionsv1.CustomResourceDefinition {
+	// Keep deterministic order so that we don't trigger updates without actually changing the schema.
+	sort.SliceStable(versions, func(i, j int) bool {
+		return k8sversion.CompareKubeAwareVersionStrings(versions[i].gv.Version, versions[j].gv.Version) > 0
+	})
+
+	// Determine the storage version: use the preferred version if it was
+	// discovered, otherwise fall back to the highest-priority version.
+	storageVer := preferredVer
+	storageFound := false
+	for _, v := range versions {
+		if v.gv.Version == storageVer {
+			storageFound = true
+			break
+		}
+	}
+	if !storageFound {
+		storageVer = versions[0].gv.Version
+	}
+
+	// Canonical resource metadata (names, scope) comes from the storage version.
+	canonical := versions[0]
+	for _, v := range versions {
+		if v.gv.Version == storageVer {
+			canonical = v
+			break
+		}
+	}
+
+	scope := apiextensionsv1.ClusterScoped
+	if canonical.resource.Namespaced {
+		scope = apiextensionsv1.NamespaceScoped
+	}
+	singular := canonical.resource.SingularName
+	if singular == "" {
+		singular = strings.ToLower(canonical.resource.Kind)
+	}
+
+	crdVersions := make([]apiextensionsv1.CustomResourceDefinitionVersion, 0, len(versions))
+	for _, v := range versions {
+		crdv := apiextensionsv1.CustomResourceDefinitionVersion{
+			Name:    v.gv.Version,
+			Served:  true,
+			Storage: v.gv.Version == storageVer,
+			Schema:  &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: v.props},
+		}
+		if v.hasStatus {
+			crdv.Subresources = &apiextensionsv1.CustomResourceSubresources{
+				Status: &apiextensionsv1.CustomResourceSubresourceStatus{},
+			}
+		}
+		crdVersions = append(crdVersions, crdv)
+	}
+
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: gr.Resource + "." + gr.Group},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: gr.Group,
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural:   canonical.resource.Name,
+				Singular: singular,
+				Kind:     canonical.resource.Kind,
+				ListKind: canonical.resource.Kind + "List",
+			},
+			Scope:    scope,
+			Versions: crdVersions,
+		},
+	}
 }
 
 // schemaForGVK finds the component schema for gvk in an OpenAPI v3 document and
@@ -186,38 +285,4 @@ func normalize(p *apiextensionsv1.JSONSchemaProps) *apiextensionsv1.JSONSchemaPr
 		p.Items.Schema = normalize(p.Items.Schema)
 	}
 	return p
-}
-
-func buildCRD(gv schema.GroupVersion, r metav1.APIResource, hasStatus bool, props *apiextensionsv1.JSONSchemaProps) *apiextensionsv1.CustomResourceDefinition {
-	scope := apiextensionsv1.ClusterScoped
-	if r.Namespaced {
-		scope = apiextensionsv1.NamespaceScoped
-	}
-	singular := r.SingularName
-	if singular == "" {
-		singular = strings.ToLower(r.Kind)
-	}
-	version := apiextensionsv1.CustomResourceDefinitionVersion{
-		Name:    gv.Version,
-		Served:  true,
-		Storage: true,
-		Schema:  &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: props},
-	}
-	if hasStatus {
-		version.Subresources = &apiextensionsv1.CustomResourceSubresources{Status: &apiextensionsv1.CustomResourceSubresourceStatus{}}
-	}
-	return &apiextensionsv1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: r.Name + "." + gv.Group},
-		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-			Group: gv.Group,
-			Names: apiextensionsv1.CustomResourceDefinitionNames{
-				Plural:   r.Name,
-				Singular: singular,
-				Kind:     r.Kind,
-				ListKind: r.Kind + "List",
-			},
-			Scope:    scope,
-			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{version},
-		},
-	}
 }

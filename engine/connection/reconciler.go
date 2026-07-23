@@ -478,12 +478,16 @@ func (r *Reconciler) discoverAndInstall(ctx context.Context, conn *corev1alpha1.
 		if _, err := crdpull.Install(ctx, r.Client, crd, conn.Name, conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce); err != nil {
 			return "", nil, fmt.Errorf("installing synthesized CRD %q: %w", crd.Name, err)
 		}
+		versions := make([]string, len(crd.Spec.Versions))
+		for i, v := range crd.Spec.Versions {
+			versions[i] = v.Name
+		}
 		exported = append(exported, corev1alpha1.ExportedAPI{
 			Name:     crd.Name,
 			Group:    crd.Spec.Group,
 			Resource: crd.Spec.Names.Plural,
 			Scope:    crd.Spec.Scope,
-			Versions: []string{crd.Spec.Versions[0].Name},
+			Versions: versions,
 		})
 	}
 	sort.Slice(exported, func(i, j int) bool { return exported[i].Name < exported[j].Name })
