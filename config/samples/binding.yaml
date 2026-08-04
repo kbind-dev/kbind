@@ -1,5 +1,6 @@
 # The "one apply" bundle. Apply this on the CONSUMER cluster.
-# (The kubeconfig Secret is created separately by the demo script.)
+# (The kubeconfig Secret is created separately by the demo script; a kbind
+# backend generates this whole file for you — see docs/proposals/v2-extended.md.)
 apiVersion: core.kbind.io/v1alpha1
 kind: Connection
 metadata:
@@ -21,3 +22,21 @@ spec:
     name: demo-provider
   apis:
     - name: widgets.example.org
+  # Related resources: the provider's labeled Secret/ConfigMap sync into this
+  # cluster alongside the widgets (same namespace/name, garbage-collected when
+  # they stop matching or on unbind).
+  relatedResources:
+    - group: ""
+      resource: secrets
+      direction: FromProvider
+      selector:
+        labelSelector:
+          matchLabels:
+            widgets.example.org/related: "true"
+    - group: ""
+      resource: configmaps
+      direction: FromProvider
+      selector:
+        labelSelector:
+          matchLabels:
+            widgets.example.org/related: "true"

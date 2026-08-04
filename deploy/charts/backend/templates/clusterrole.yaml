@@ -1,0 +1,75 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "backend.fullname" . }}
+  labels:
+    {{- include "backend.labels" . | nindent 4 }}
+rules:
+  # Catalog: the gateway reads it, the Export controller validates it.
+  - apiGroups: ["catalog.kbind.io"]
+    resources: ["exports", "collections"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["catalog.kbind.io"]
+    resources: ["exports/status"]
+    verbs: ["get", "update", "patch"]
+  # Issuance records: the gateway writes Grants, the issuer reconciles them.
+  - apiGroups: ["iam.kbind.io"]
+    resources: ["grants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["iam.kbind.io"]
+    resources: ["grants/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["iam.kbind.io"]
+    resources: ["grants/finalizers"]
+    verbs: ["update"]
+  # Exported-CRD discovery (catalog validation is derived-from-core-truth),
+  # plus create/update for the backend's CRD self-install (--install-crds;
+  # set it false and drop these verbs if CRDs are managed out-of-band).
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Issuer artifacts: boundary namespaces, ServiceAccounts, token Secrets.
+  # Namespace delete is the reaper's destructive opt-in.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Issued RBAC. The issuer creates Roles enumerating the granted APIs, which
+  # the backend does not hold itself — "escalate" allows exactly that, and
+  # "bind" (also a verb on the role resources, not the binding resources)
+  # allows binding those roles to the tenant ServiceAccounts.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterroles"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "escalate", "bind"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Consumer heartbeats (reaper and the clusters view read them across
+  # boundary namespaces).
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch"]
+  # The clusters view counts synced objects of the exported APIs. Those are
+  # open-ended (whatever this provider exports), so read access defaults to
+  # all groups — narrow to your exported groups to tighten the blast radius.
+  {{- with .Values.rbac.syncedResourceGroups }}
+  - apiGroups:
+      {{- toYaml . | nindent 6 }}
+    resources: ["*"]
+    verbs: ["get", "list"]
+  {{- end }}
+  # kubernetes-auth: verify caller tokens.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  # Events emitted by the controllers.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+{{- end }}

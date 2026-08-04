@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kbind</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='5' cy='8' r='3' fill='none' stroke='%232E6E52' stroke-width='2'/><circle cx='11' cy='8' r='3' fill='none' stroke='%231D2A2E' stroke-width='2'/></svg>">
+</head>
+<body>
+  <div class="shell">
+    <aside class="side">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="5" cy="8" r="3.2" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+          <circle cx="11" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        </svg>
+        <span class="brand-name">kbind</span>
+      </div>
+      <span class="context-chip" id="provider-chip" hidden>
+        <span class="chip-key">provider:</span> <span id="provider-name"></span>
+      </span>
+
+      <nav class="nav" id="nav" hidden aria-label="Views">
+        <button class="nav-item active" id="nav-catalog">Catalog</button>
+        <button class="nav-item" id="nav-clusters">Clusters</button>
+      </nav>
+
+      <div class="side-foot">
+        <div class="whoami" id="whoami"></div>
+        <a class="signout" href="/api/auth/logout">Sign out</a>
+      </div>
+    </aside>
+
+    <main id="main">
+      <section id="view-loading" class="stage"><p class="muted">Reaching the gateway…</p></section>
+
+      <section id="view-catalog" class="stage" hidden>
+        <div id="pane-catalog">
+          <div class="catalog-head">
+            <h1>Catalog</h1>
+            <p class="muted" id="catalog-count"></p>
+          </div>
+          <div id="catalog"></div>
+        </div>
+        <div id="pane-clusters" hidden>
+          <div class="catalog-head">
+            <h1>Clusters</h1>
+            <button class="btn primary" id="connect-btn">Connect a cluster</button>
+          </div>
+          <p class="muted small">Consumer clusters, known from the konnector's
+            heartbeat Leases: what each has bound, and how many objects it is
+            syncing onto this provider. <span id="clusters-count"></span></p>
+          <div id="clusters"></div>
+        </div>
+      </section>
+
+      <section id="view-error" class="stage" hidden>
+        <h1>Something's off</h1>
+        <p class="muted" id="error-text"></p>
+      </section>
+    </main>
+  </div>
+
+  <!-- The bundle ticket: single-use, short-lived, the terminal output of everything above. -->
+  <dialog id="ticket">
+    <div class="ticket-inner">
+      <div class="ticket-head">
+        <span class="ticket-eyebrow">one-time bundle</span>
+        <button class="btn ghost" id="ticket-close" aria-label="Close">✕</button>
+      </div>
+      <h2 id="ticket-title"></h2>
+      <p class="ticket-note">This pickup link works <strong>once</strong> and expires in
+        <span class="countdown" id="countdown"></span>. The credentials inside
+        keep working after pickup — commit the file to git if you do GitOps.</p>
+      <div class="ticket-actions">
+        <a class="btn primary" id="dl" download>Download bundle</a>
+        <button class="btn" id="copy-curl">Copy curl | kubectl apply</button>
+        <button class="btn" id="copy-cli">Copy kbind command</button>
+      </div>
+      <pre class="cmd" id="cmd-preview"></pre>
+      <p class="ticket-expired" id="ticket-expired" hidden>This link has expired or been used.
+        Bind again for a fresh one — re-binding is always safe.</p>
+
+      <details id="browser-apply" hidden>
+        <summary>Apply from the browser instead</summary>
+        <p class="muted small">Your cluster's kubeconfig transits the gateway. Paste one
+          scoped to a throwaway context if you can.</p>
+        <textarea id="apply-kubeconfig" rows="6" spellcheck="false"
+          placeholder="Paste a consumer-cluster kubeconfig…"></textarea>
+        <label class="check"><input type="checkbox" id="apply-konnector" checked> Also install the konnector</label>
+        <button class="btn primary" id="apply-btn">Apply to cluster</button>
+        <pre class="cmd" id="apply-result" hidden></pre>
+      </details>
+    </div>
+  </dialog>
+
+  <!-- Connect a cluster: install the konnector, then bind from the catalog. -->
+  <dialog id="connect">
+    <div class="ticket-inner">
+      <div class="ticket-head">
+        <span class="ticket-eyebrow connect-eyebrow">connect a cluster</span>
+        <button class="btn ghost" id="connect-close" aria-label="Close">✕</button>
+      </div>
+      <h2>Install the konnector</h2>
+      <p class="ticket-note">Run this against the cluster you want to connect.
+        It installs the konnector (CRDs, RBAC, Deployment) — the only thing
+        that ever runs on your side.</p>
+      <pre class="cmd" id="connect-cmd"></pre>
+      <div class="ticket-actions">
+        <button class="btn primary" id="connect-copy">Copy command</button>
+        <a class="btn" id="connect-dl" href="/api/konnector" download="konnector.yaml">Download konnector.yaml</a>
+      </div>
+      <p class="ticket-note">Then pick a service in the <strong>Catalog</strong> and
+        apply its bundle — the cluster appears here once its heartbeat starts.</p>
+
+      <details id="connect-apply" hidden>
+        <summary>Install from the browser instead</summary>
+        <p class="muted small">Your cluster's kubeconfig transits the gateway. Paste one
+          scoped to a throwaway context if you can.</p>
+        <textarea id="connect-kubeconfig" rows="6" spellcheck="false"
+          placeholder="Paste a consumer-cluster kubeconfig…"></textarea>
+        <button class="btn primary" id="connect-apply-btn">Install konnector</button>
+        <pre class="cmd" id="connect-apply-result" hidden></pre>
+      </details>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# Copyright 2026 The Kube Bind Authors.
+# Copyright 2026 The Kbind Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# konnector image. Build context is the repo root; the root module is the
-# konnector and pulls in the sibling sdk module via
-# `replace github.com/kbind/kbind/sdk => ./sdk`:
+# kbind images. Build context is the repo root; the root module pulls in the
+# sibling sdk module via `replace github.com/kbind/kbind/sdk => ./sdk`:
 #
-#   docker build -t kbind/konnector:dev .
+#   docker build -t kbind/konnector:dev .                    # default target
+#   docker build --target backend -t kbind/backend:dev .
 #
 # Pin the builder to the build host's native platform and cross-compile via
 # GOARCH/GOOS (CGO disabled), so multi-arch builds need no QEMU emulation.
@@ -36,9 +36,21 @@ RUN go mod download
 
 COPY cmd/ cmd/
 COPY engine/ engine/
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /bin/konnector ./cmd/konnector
+COPY backend/ backend/
+COPY cli/ cli/
+COPY pkg/ pkg/
+COPY web/ web/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /bin/konnector ./cmd/konnector && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="${LDFLAGS}" -o /bin/backend ./cmd/backend
 
-FROM gcr.io/distroless/static:nonroot
+# The provider-side service layer (gateway + issuer + reaper), module-flagged.
+FROM gcr.io/distroless/static:nonroot AS backend
+COPY --from=builder /bin/backend /bin/backend
+USER 65532:65532
+ENTRYPOINT ["/bin/backend"]
+
+# The konnector — last stage, so a target-less build keeps producing it.
+FROM gcr.io/distroless/static:nonroot AS konnector
 COPY --from=builder /bin/konnector /bin/konnector
 USER 65532:65532
 ENTRYPOINT ["/bin/konnector"]

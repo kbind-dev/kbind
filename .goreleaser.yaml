@@ -1,0 +1,50 @@
+# goreleaser config for the bind CLI (pinned to goreleaser v2.5.x in CI).
+# Archives carry the binary as kubectl-bind for the krew "bind" plugin;
+# krew-release-bot (not goreleaser's krews) PRs upstream krew-index.
+version: 2
+
+project_name: bind
+
+builds:
+  - id: bind
+    main: ./cmd/bind
+    binary: kubectl-bind
+    env:
+      - CGO_ENABLED=0
+      - GOWORK=off
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X github.com/kbind/kbind/cli/cmd.Version={{ .Tag }}
+
+archives:
+  - id: bind
+    format: tar.gz
+    name_template: 'kubectl-bind_{{ .Tag }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  # Attach to the tag's release; notes come from GitHub's generator.
+  mode: replace
+  # Belt and braces: the workflow already skips prerelease tags, but if
+  # goreleaser is ever run on one by hand, mark the GitHub release as a
+  # prerelease so it never becomes "latest".
+  prerelease: auto
+
+snapshot:
+  version_template: '{{ .Tag }}-snapshot'
+
+changelog:
+  use: github-native

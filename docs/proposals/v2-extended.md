@@ -1,9 +1,16 @@
-# kube-bind v2 Extended: Backend API, CLI, UI
+# kbind v2 Extended: Backend API, CLI, UI
 
-* Status: **DRAFT — for iteration**
+* Status: **ACCEPTED — in implementation**
 * Authors: @mjudeikis
-* Date: 2026-06-10
-* Builds on: [v2-slim-core.md](v2-slim-core.md) (Proposed)
+* Date: 2026-06-10 (updated 2026-07-29 for the kbind rename + root-layout restructure)
+* Builds on: [v2-slim-core.md](v2-slim-core.md) (implemented on the `v2-next` branch)
+
+> **2026-07-29 update.** The slim core shipped under a new identity: the project is
+> **kbind** (`github.com/kbind/kbind`, API group `core.kbind.io`), the `v2/` prefix is
+> gone (the konnector module IS the repo root, v1 was deleted). Everything below is
+> normalized to that reality: groups are `catalog.kbind.io` / `iam.kbind.io`, the CLI is
+> `kbind`, the backend binary is `kbind-backend`, and the Packaging section describes the
+> root layout. Additional implementation decisions are logged in **Decided**.
 
 ## Summary
 
@@ -64,11 +71,11 @@ Raw discovery already exists in core (`Connection.status.exportedAPIs` from labe
 CRDs / the workspace boundary). The catalog adds **curation**: human-facing metadata
 and sensible defaults that turn "a list of CRD names" into "a service you'd choose".
 
-Group: `catalog.kube-bind.io`. Two kinds, successors of v1's
+Group: `catalog.kbind.io`. Two kinds, successors of v1's
 `APIServiceExportTemplate` and `Collection`:
 
 ```yaml
-apiVersion: catalog.kube-bind.io/v1alpha1
+apiVersion: catalog.kbind.io/v1alpha1
 kind: Export                          # one offering
 metadata:
   name: mangodb
@@ -93,7 +100,7 @@ spec:
 ```
 
 ```yaml
-apiVersion: catalog.kube-bind.io/v1alpha1
+apiVersion: catalog.kbind.io/v1alpha1
 kind: Collection                      # grouping for UI/CLI browsing
 metadata:
   name: databases
@@ -135,7 +142,7 @@ distribution, which wires its own implementation against the same interface.
   revisitable without API change (the bundle's Secret is replaceable; a bounded-token +
   reissue mode can be added later behind the same interface). Revocation = delete the
   `Grant` → issuer deletes the SA/token.
-* Records issuance in **`Grant`** (`iam.kube-bind.io` — an issuance/identity record, not
+* Records issuance in **`Grant`** (`iam.kbind.io` — an issuance/identity record, not
   catalog presentation): "identity X was issued credentials Y for export Z". The anchor
   for revocation, audit, and the reaper.
 
@@ -177,39 +184,50 @@ previously committed bundle unless that `Grant` is explicitly revoked.
 
 * `Authenticator` interface: `Routes()` (mounted under `/api/auth/…`) +
   `Authenticate(r) (Identity, error)`. Reference implementations: OIDC (code grant +
-  PKCE, as v1) and `kubernetes` (SubjectAccessReview against the provider — for
-  in-platform UIs that already hold a cluster identity).
-* The embedded mock-OIDC server survives **only** as a dev-mode flag.
-* Session store stays an interface (memory, Redis as today) but the gateway must be
-  fully functional with ≥2 replicas out of the box — Redis (or any external store) is
-  the documented production default, memory is dev-only.
+  PKCE, as v1) and `kubernetes` (TokenReview against the provider — for in-platform
+  UIs that already hold a cluster identity).
+* The embedded mock-OIDC server survives **only** as a dev-mode flag (`--oidc-mock`).
+* OIDC is configured with kube-apiserver/kcp-style flags: `--oidc-issuer-url`,
+  `--oidc-client-id`, `--oidc-client-secret`, `--oidc-ca-file`,
+  `--oidc-username-claim`, `--oidc-groups-claim`, `--oidc-scopes`,
+  `--oidc-redirect-url`.
+* Sessions are **stateless encrypted cookies/tokens** (keys via
+  `--cookie-signing-key`/`--cookie-encryption-key`) — no session store at all. With
+  shared keys, any number of gateway replicas works out of the box; the same encrypted
+  blob doubles as the CLI's bearer token. (Supersedes the earlier memory/Redis
+  session-store idea: the only server-side state the flow ever needed — one-time bundle
+  pickup — lives on the `Grant` via annotations with optimistic concurrency, so the
+  gateway keeps zero state.)
 * Identity → tenancy key: `issuer + "/" + subject` hash, as v1, so the same human gets
   the same boundary on re-bind.
 
 ### 5. Reaper (provider-side, optional)
 
 The core leaves dead-consumer GC explicitly to this layer, keyed off the per-Connection
-`Lease` the konnector maintains. **This component is blocked on that core primitive:** the
-konnector's provider-side `Lease` is specified in the core proposal but is new (no v1
-equivalent), so the reaper ships only once the konnector actually maintains the Lease;
-until then dead-consumer GC is manual.
+`Lease` the konnector maintains. That core primitive is implemented (the konnector
+renews a `coordination.k8s.io/Lease` per Connection on the provider), so the reaper is
+unblocked.
 
 * Lease expired beyond TTL → mark the issuance stale → (configurably) revoke
   credentials, then delete kube-bind-created namespaces and synced objects.
 * TTLs and the destructive step are opt-in and conservative by default (revoke ≠
   delete; deletion requires explicit enablement).
 
-### 6. CLI (`kubectl bind`)
+### 6. CLI (`kbind`)
 
-Thin client over the gateway; everything it does is reproducible by hand:
+Thin client over the gateway; everything it does is reproducible by hand. Named `kbind`
+(a copy/symlink as `kubectl-bind` makes it a kubectl plugin). The **krew plugin name
+stays `bind`** (kept from v1 — `kubectl krew install bind` keeps working): release
+archives ship the binary as `kubectl-bind`, and krew-release-bot renders `.krew.yaml`
+against each GitHub release to PR krew-index (`.github/workflows/cli.yaml`).
 
 ```sh
-kubectl bind login https://mangodb.example.com        # auth, cache token
-kubectl bind catalog                                  # list Exports/Collections
-kubectl bind mangodb                                  # bind an Export:
+kubectl bind login https://mangodb.example.com               # auth, cache token
+kubectl bind catalog                                         # list Exports/Collections
+kubectl bind export mangodb                             # bind an Export:
                                                       #   POST /api/bind → bundle
-                                                      #   → kubectl apply (or -o yaml)
-kubectl bind mangodb -o yaml > binding.yaml           # GitOps mode: print, don't apply
+                                                      #   → apply (or -o yaml)
+kubectl bind export mangodb -o yaml > binding.yaml      # GitOps mode: print, don't apply
 ```
 
 * `--install-konnector` (default on for interactive use) installs/upgrades the v2
@@ -236,12 +254,32 @@ credentials transit the gateway, which deployments must consciously accept.
 
 ## Packaging & repo
 
-Per the frozen core layout: `v2/backend` (gateway + issuer + reaper + auth), `v2/cli`,
-`v2/web`. The backend ships as **one binary with module flags** (`--enable-gateway`,
+Post-restructure layout (the repo root is the kbind module; `sdk/` is the standalone
+type module):
+
+```
+kbind/
+├── sdk/apis/core/v1alpha1/       # core (implemented)
+├── sdk/apis/catalog/v1alpha1/    # Export, Collection
+├── sdk/apis/iam/v1alpha1/        # Grant
+├── backend/                      # this proposal's server-side packages
+│   ├── auth/                     #   Authenticator iface, OIDC (+dev mock), sessions
+│   ├── issuer/                   #   Issuer iface + kube impl + Grant controller
+│   ├── gateway/                  #   HTTP API + embedded UI
+│   └── reaper/                   #   Lease-keyed GC
+├── cli/                          # kbind CLI packages
+├── web/                          # SPA sources (embedded into the gateway)
+├── cmd/konnector/                # core (implemented)
+├── cmd/backend/                  # kbind-backend binary
+└── cmd/kbind/                    # CLI binary
+```
+
+The backend ships as **one binary with module flags** (`--enable-gateway`,
 `--enable-issuer`, `--enable-reaper`, `--enable-apply`) — operational simplicity over
 purity; the boundaries stay as Go packages so a future split costs a `main.go`, not a
-refactor. All of it depends on `v2/sdk` only. The kcp distribution (`contrib/kcp`)
-remains separate, providing its own issuer implementation behind the same interface.
+refactor. Types the backend serves live in `sdk` (separate module) so integrations can
+depend on the APIs without the server. A future kcp distribution provides its own issuer
+implementation behind the same interface (it no longer lives in this repo).
 
 ## Migration notes
 
@@ -255,9 +293,9 @@ remains separate, providing its own issuer implementation behind the same interf
 
 * **Packaging**: one `kube-bind-backend` binary; gateway/issuer/reaper/apply are module
   flags, boundaries kept as Go packages.
-* **Issuance anchor**: `Grant` in `iam.kube-bind.io` — the typed record of
+* **Issuance anchor**: `Grant` in `iam.kbind.io` — the typed record of
   "identity X was issued credentials Y for export Z"; anchor for revocation, audit,
-  reaper. Kept out of `catalog.kube-bind.io` so that group stays purely presentation+defaults.
+  reaper. Kept out of `catalog.kbind.io` so that group stays purely presentation+defaults.
 * **Credentials**: long-lived secret-based SA token (v1 behavior) — zero rotation
   friction accepted over security posture; revocation via `Grant` deletion; bounded
   tokens addable later behind the same issuer interface without API change.
@@ -273,6 +311,43 @@ remains separate, providing its own issuer implementation behind the same interf
   is an explicitly accepted trade-off when enabled.
 * **Federation**: one gateway = one provider; cross-provider aggregation is a future
   layer above the bundle protocol.
+
+Added 2026-07-29 (implementation round):
+
+* **Naming**: project is **kbind**. Groups `catalog.kbind.io` (Export, Collection) and
+  `iam.kbind.io` (Grant); binaries `kbind-backend` and `kbind` (CLI, kubectl-plugin
+  compatible); packages `backend/`, `cli/`, `web/` in the root module.
+* **Sessions**: stateless encrypted cookie/bearer tokens, no session store (see §4).
+  HA needs only shared cookie keys across replicas.
+* **One-time pickup without gateway state**: the pickup token is
+  `<grant-name>.<random>`; the gateway stamps `sha256(random)` + expiry as annotations
+  on the `Grant` at bind time and removes them (optimistic concurrency) on pickup. The
+  bundle itself is (re)constructed on demand from the issuer's token Secret — never
+  stored at rest, single-use enforced by the API server, HA-safe.
+* **Grant is spec-resolved at bind time**: the gateway copies the `Export`'s API list +
+  defaults into `Grant.spec`, so issuance is a stable record even if the catalog entry
+  changes later. The issuer controller provisions namespace/SA/RBAC from `Grant.spec`
+  and reports the artifacts in `Grant.status`; deletion (revocation) unwinds via an
+  `iam.kbind.io/cleanup` finalizer.
+* **Lease ↔ Grant link (per-grant)**: the issued kubeconfig pins its context namespace
+  to the per-consumer boundary namespace, and the konnector's heartbeat writes its
+  Lease into the kubeconfig's context namespace when set (falling back to the `kbind`
+  namespace). The Lease is named `<connection>-<consumer-uid-prefix>` and annotated
+  with its Connection name; since the bundle names the Connection after the Grant, the
+  reaper judges staleness **per grant** by that annotation. Fallback for hand-renamed
+  Connections is conservative: any fresh Lease in the boundary keeps its Grants alive,
+  only a fully silent boundary goes stale. RBAC for Leases stays scoped to the
+  tenant's own namespace.
+* **kubernetes authenticator**: implemented as **TokenReview** (not SAR — SAR is
+  authorization; identity comes from TokenReview) against the provider, behind
+  `--kubernetes-auth`. Tenancy key `kubernetes#<username>`. No interactive routes —
+  in-platform callers just send their own bearer token.
+* **Packaging (charts)**: `deploy/charts/backend` ships the service layer (module
+  flags as values, catalog+iam CRDs, Service, RBAC incl. `escalate`/`bind` so the
+  issuer may create Roles enumerating APIs the backend itself does not hold; OIDC
+  client secret and cookie keys via existing Secrets).
+* **UI**: dependency-free static SPA (embedded via `go:embed` into the gateway) — no
+  build toolchain in the repo; pure gateway client.
 
 ## Open questions
 

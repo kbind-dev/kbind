@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · kbind</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='5' cy='8' r='3' fill='none' stroke='%232E6E52' stroke-width='2'/><circle cx='11' cy='8' r='3' fill='none' stroke='%231D2A2E' stroke-width='2'/></svg>">
+</head>
+<body>
+  <section class="login-page">
+    <div class="login-card">
+      <div class="brand login-brand">
+        <svg class="brand-mark" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="5" cy="8" r="3.2" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+          <circle cx="11" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        </svg>
+        <span class="brand-name">kbind</span>
+      </div>
+      <h1>Bind this provider's APIs<br>into your cluster.</h1>
+      <p class="lede">Browse the catalog, pick a service, and get a one-apply
+        bundle — a single <code>kubectl apply</code> that wires the sync.
+        Nothing else runs in your cluster besides the konnector.</p>
+      <a class="btn primary" href="/api/auth/oidc/login?redirect=/">Sign in to browse the catalog</a>
+      <p class="login-provider muted small" id="login-provider" hidden>
+        provider: <span class="mono" id="login-provider-name"></span></p>
+    </div>
+  </section>
+  <script>
+    fetch("/api/provider").then((r) => r.json()).then((p) => {
+      document.getElementById("login-provider-name").textContent = p.name;
+      document.getElementById("login-provider").hidden = false;
+      document.title = "Sign in · " + p.name;
+    }).catch(() => {});
+  </script>
+</body>
+</html>

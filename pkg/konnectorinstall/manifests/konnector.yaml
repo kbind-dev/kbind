@@ -1,0 +1,144 @@
+# Static konnector install, mirroring deploy/charts/konnector defaults.
+# __KONNECTOR_IMAGE__ is replaced at apply time.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kbind
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: konnector
+  namespace: kbind
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: konnector
+rules:
+  # Core kbind objects the konnector reconciles (+ status, + finalizers).
+  - apiGroups: ["core.kbind.io"]
+    resources: ["connections", "clusterbindings", "bindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["core.kbind.io"]
+    resources: ["connections/status", "clusterbindings/status", "bindings/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["core.kbind.io"]
+    resources: ["connections/finalizers", "clusterbindings/finalizers", "bindings/finalizers"]
+    verbs: ["update"]
+  # CRDs: the konnector pulls/synthesizes and installs the bound APIs.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Provider kubeconfig Secrets: read + finalizer (never deleted by the konnector).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Namespaces: read for cluster identity; create for related-resource copies.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create"]
+  # Cluster identity on kcp-shaped consumers (best-effort; harmless if absent).
+  - apiGroups: ["core.kcp.io"]
+    resources: ["logicalclusters"]
+    verbs: ["get", "list", "watch"]
+  # Events emitted by the reconcilers (conflicts, permission denials).
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Instances of the bound APIs synced between consumer and provider
+  # (open-ended; narrow via the Helm chart if needed).
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: konnector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: konnector
+subjects:
+  - kind: ServiceAccount
+    name: konnector
+    namespace: kbind
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: konnector-leaderelection
+  namespace: kbind
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: konnector-leaderelection
+  namespace: kbind
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: konnector-leaderelection
+subjects:
+  - kind: ServiceAccount
+    name: konnector
+    namespace: kbind
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnector
+  namespace: kbind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: konnector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: konnector
+    spec:
+      serviceAccountName: konnector
+      containers:
+        - name: konnector
+          image: "__KONNECTOR_IMAGE__"
+          args:
+            - --metrics-bind-address=:8085
+            - --health-probe-bind-address=:8081
+            - --leader-elect=false
+            - --leader-election-id=konnector.kbind.io
+          ports:
+            - name: metrics
+              containerPort: 8085
+            - name: probe
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probe
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true

@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kube Bind Authors.
+Copyright 2026 The Kbind Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -60,7 +60,9 @@ type Reconciler struct {
 	// (so a CRD labeled exported after connect is picked up). 0 = default 30s.
 	DiscoveryResync time.Duration
 	// LeaseNamespace is the provider namespace where the konnector maintains its
-	// heartbeat Lease. 0 = default "kbind".
+	// heartbeat Lease. Empty = the kubeconfig context's namespace if set (a
+	// service-layer issuer pins it to the per-consumer tenancy boundary),
+	// falling back to "kbind".
 	LeaseNamespace string
 }
 
@@ -69,9 +71,15 @@ const (
 	leaseDurationSeconds  = 60
 )
 
-func (r *Reconciler) leaseNamespace() string {
+// leaseNamespace resolves where the heartbeat Lease lives: the explicit
+// override, else the kubeconfig context's namespace (the issuer pins it to the
+// per-consumer boundary, where tenant RBAC allows Leases), else "kbind".
+func (r *Reconciler) leaseNamespace(ctx context.Context, conn *corev1alpha1.Connection) string {
 	if r.LeaseNamespace != "" {
 		return r.LeaseNamespace
+	}
+	if ns, err := remote.DefaultNamespaceFromConnection(ctx, r.Client, conn); err == nil && ns != "" {
+		return ns
 	}
 	return leaseNamespaceDefault
 }
@@ -251,7 +259,7 @@ func (r *Reconciler) heartbeat(ctx context.Context, providerClient client.Client
 	if conn.Status.LocalClusterUID == "" {
 		return nil
 	}
-	ns := r.leaseNamespace()
+	ns := r.leaseNamespace(ctx, conn)
 	if err := providerClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil &&
 		!apierrors.IsAlreadyExists(err) && !apierrors.IsForbidden(err) {
 		return fmt.Errorf("ensuring lease namespace: %w", err)
@@ -268,6 +276,7 @@ func (r *Reconciler) heartbeat(ctx context.Context, providerClient client.Client
 			lease.Annotations = map[string]string{}
 		}
 		lease.Annotations[corev1alpha1.AnnotationConsumerClusterUID] = conn.Status.LocalClusterUID
+		lease.Annotations[corev1alpha1.AnnotationConnection] = conn.Name
 		lease.Spec.HolderIdentity = ptr.To(conn.Status.LocalClusterUID)
 		lease.Spec.LeaseDurationSeconds = ptr.To(int32(leaseDurationSeconds))
 		if lease.Spec.AcquireTime == nil {
@@ -279,10 +288,18 @@ func (r *Reconciler) heartbeat(ctx context.Context, providerClient client.Client
 	return err
 }
 
-// leaseName keys the heartbeat Lease by the consumer cluster identity, so a
-// provider can track which consumers are alive.
+// leaseName keys the heartbeat Lease by (Connection, consumer cluster): the
+// Connection name for per-connection liveness (a service-layer bundle names
+// the Connection after its Grant, so a reaper gets per-grant staleness via
+// the connection annotation), plus a consumer-cluster-UID suffix so two
+// consumer clusters using the same Connection name in a shared namespace do
+// not fight over one Lease.
 func leaseName(conn *corev1alpha1.Connection) string {
-	return "consumer-" + conn.Status.LocalClusterUID
+	uid := conn.Status.LocalClusterUID
+	if len(uid) > 10 {
+		uid = uid[:10]
+	}
+	return conn.Name + "-" + uid
 }
 
 // reconcileAutoBind keeps a managed ClusterBinding named after the Connection in

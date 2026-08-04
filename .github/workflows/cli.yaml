@@ -1,0 +1,42 @@
+name: CLI
+
+# Release the bind CLI on FINAL tags via goreleaser (archives, checksums,
+# GitHub release), then let krew-release-bot render .krew.yaml and PR
+# krew-index for the "bind" plugin (name kept from v1; archive binary is
+# kubectl-bind).
+#
+# Release candidates (v*-rc*, any v*-* prerelease) do NOT release the CLI:
+# users' binaries and the krew plugin only move forward on final versions.
+# (Images still publish on every v* tag — see image.yaml — so RCs stay
+# testable in-cluster.)
+on:
+  push:
+    tags:
+      - 'v*'
+      - '!v*-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version: v1.26.2
+
+    # goreleaser run via `go run` (version-pinned) — no third-party action.
+    - name: Run goreleaser
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: go run github.com/goreleaser/goreleaser/v2@v2.5.0 release --clean
+
+    # Renders .krew.yaml against this release and PRs krew-index. Pinned by
+    # tag (upstream publishes no SHA-stable releases); it only needs the
+    # public release artifacts, no repo secrets.
+    - name: Update krew-index
+      uses: rajatjindal/krew-release-bot@v0.0.47

@@ -1,0 +1,155 @@
+# Default values for the backend chart. The backend runs on (or against) the
+# **provider** cluster.
+
+image:
+  repository: ghcr.io/kbind/backend
+  # Defaults to the chart appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# The gateway is stateless — every replica serves traffic. Sessions and pickup
+# tokens work across replicas as long as cookieKeys.existingSecret is set (so
+# all replicas share the same keys). The issuer/reaper controllers are gated by
+# leader election, forced on automatically when replicaCount > 1.
+replicaCount: 1
+
+leaderElect: false
+leaderElectionID: backend.kbind.io
+
+# Module flags: any subset works; the GitOps-only core path needs none of them.
+modules:
+  gateway: true
+  issuer: true
+  reaper: false
+  # Browser-apply (POST /api/apply). Consumer kubeconfigs transit the gateway
+  # when enabled — turn on consciously.
+  apply: false
+
+# Human-facing provider name in /api/provider and the UI.
+providerName: kbind
+
+# Externally reachable base URL of the gateway (e.g. https://kbind.example.com).
+# Defaults the OIDC callback URL. Required for real deployments.
+externalURL: ""
+
+# Provider API server URL written into issued kubeconfigs. Empty = the API
+# server host the backend itself talks to (fine when consumers can reach it).
+externalAddress: ""
+
+# RBAC reach of issued credentials: Cluster (exported resources in all
+# namespaces) or Namespace (boundary namespace only — strict tenancy).
+issuerScope: Cluster
+
+# Konnector image installed by browser-apply. Empty = the baked-in default.
+konnectorImage: ""
+
+oidc:
+  # Kube-apiserver-style OIDC configuration for the gateway's login flow.
+  issuerURL: ""
+  clientID: ""
+  # Name of an existing Secret with key "clientSecret".
+  existingSecret: ""
+  usernameClaim: sub
+  groupsClaim: ""
+  scopes: "openid,profile,email"
+  # Defaults to <externalURL>/api/auth/oidc/callback.
+  redirectURL: ""
+  # Dev only: embedded mock issuer that auto-approves every login.
+  mock: false
+  # Fixed in-pod port for the mock issuer (127.0.0.1-bound). Port-forward it
+  # alongside the gateway so a host browser can reach the issuer:
+  #   kubectl port-forward ... 5556:5556
+  mockPort: 5556
+
+# Also accept provider-cluster bearer tokens (TokenReview) — for in-platform
+# callers that already hold a cluster identity.
+kubernetesAuth: false
+
+# Name of an existing Secret holding the session cookie keys, with keys
+# "signingKey" (base64 text of 32/64 random bytes) and "encryptionKey" (base64
+# text of 16/24/32 random bytes). REQUIRED for replicaCount > 1 and for
+# sessions to survive restarts; empty = ephemeral random keys (dev only).
+# Generate: kubectl create secret generic kbind-cookie-keys \
+#   --from-literal=signingKey=$(openssl rand -base64 64) \
+#   --from-literal=encryptionKey=$(openssl rand -base64 32)
+cookieKeys:
+  existingSecret: ""
+
+sessionTTL: 12h
+pickupTTL: 5m
+
+reaper:
+  # Heartbeat silence after which a Grant is considered stale.
+  ttl: 30m
+  # Delete stale Grants (revokes their credentials). Conservative default: off.
+  revoke: false
+  # When revoking, also delete the boundary namespace and the synced objects
+  # inside it. Destructive; requires revoke.
+  deleteBoundary: false
+  interval: 1m
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Port the gateway listens on inside the pod (--listen-address).
+listenPort: 8080
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+  # API groups the clusters view may read to count synced objects (the
+  # exported APIs are open-ended). Narrow to the groups you actually export
+  # (e.g. ["example.org"]) to tighten the backend's read reach.
+  syncedResourceGroups:
+    - "*"
+
+# Extra args appended to the backend command.
+extraArgs: []
+
+metrics:
+  # Controller-manager metrics endpoint (issuer/reaper modules).
+  port: 8086
+
+healthProbe:
+  # Controller-manager probe endpoint (used when the gateway module is off).
+  port: 8082
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Install the service-layer CRDs (Export, Collection, Grant) with the release.
+# Set false if they are managed out-of-band.
+installCRDs: true

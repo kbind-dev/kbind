@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kube Bind Authors.
+Copyright 2026 The Kbind Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -106,8 +106,11 @@ func TestSlimCoreHappyCase(t *testing.T) {
 						return nil, false
 					}
 					l := &coordinationv1.Lease{}
-					key := client.ObjectKey{Namespace: framework.KbindNamespace, Name: "consumer-" + conn.Status.LocalClusterUID}
+					key := client.ObjectKey{Namespace: framework.KbindNamespace, Name: "demo-provider-" + conn.Status.LocalClusterUID[:10]}
 					if err := env.ProviderClient.Get(ctx, key, l); err != nil {
+						return nil, false
+					}
+					if l.Annotations[corev1alpha1.AnnotationConnection] != "demo-provider" {
 						return nil, false
 					}
 					return l, l.Spec.HolderIdentity != nil && *l.Spec.HolderIdentity == conn.Status.LocalClusterUID

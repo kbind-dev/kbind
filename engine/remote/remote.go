@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Kube Bind Authors.
+Copyright 2026 The Kbind Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -73,6 +73,31 @@ func RestConfigFromConnection(ctx context.Context, c client.Client, conn *corev1
 		return nil, fmt.Errorf("parsing kubeconfig: %w", err)
 	}
 	return cfg, nil
+}
+
+// DefaultNamespaceFromConnection returns the namespace of the current context
+// in the Connection's kubeconfig, or "" if none is set. A provider service
+// layer (issuer) pins this to the per-consumer tenancy boundary so tenant RBAC
+// can be namespace-scoped; the konnector uses it as the home for its heartbeat
+// Lease.
+func DefaultNamespaceFromConnection(ctx context.Context, c client.Client, conn *corev1alpha1.Connection) (string, error) {
+	ref := conn.Spec.KubeconfigSecretRef
+	key := ref.Key
+	if key == "" {
+		key = "kubeconfig"
+	}
+	var secret corev1.Secret
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &secret); err != nil {
+		return "", err
+	}
+	kubeconfig, err := clientcmd.Load(secret.Data[key])
+	if err != nil {
+		return "", fmt.Errorf("parsing kubeconfig: %w", err)
+	}
+	if kctx, ok := kubeconfig.Contexts[kubeconfig.CurrentContext]; ok {
+		return kctx.Namespace, nil
+	}
+	return "", nil
 }
 
 // logicalClusterGVK is kcp's per-workspace singleton identity object.

@@ -1,4 +1,7 @@
-# A sample provider CRD, labeled as exported. Apply this on the PROVIDER cluster.
+# The provider side of the demo. Apply this on the PROVIDER cluster:
+#   - the Widget CRD, labeled as exported (the core's entire provider opt-in),
+#   - a Secret + ConfigMap the service ships alongside its API ("related
+#     resources"), selected by label and synced provider -> consumer.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:

@@ -1,0 +1,281 @@
+/* kbind gateway UI.
+   Porcelain light, ink slate, one spruce accent for bind/ready semantics;
+   copper is reserved for single-use/expiry. Kubernetes identifiers are
+   always mono. No external assets — this ships inside the binary. */
+
+:root {
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --ink: #1d2a2e;
+  --muted: #5c6b6f;
+  --line: #dde3e0;
+  --accent: #2e6e52;
+  --accent-ink: #ffffff;
+  --copper: #a3572a;
+  --copper-soft: #f7ebe2;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+  --sans: "Avenir Next", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161c1a;
+    --surface: #1f2624;
+    --ink: #e6ebe8;
+    --muted: #93a29c;
+    --line: #33403b;
+    --accent: #58a37f;
+    --accent-ink: #0e1512;
+    --copper: #d98d5a;
+    --copper-soft: #33261c;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+a { color: var(--accent); }
+
+/* Shell: fixed left sidebar, content on the right. */
+.shell { display: flex; min-height: 100vh; }
+.side {
+  width: 218px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 20px 14px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  position: sticky; top: 0; height: 100vh;
+}
+main { flex: 1; min-width: 0; }
+
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+.brand-mark { width: 22px; height: 22px; color: var(--ink); }
+.brand-name { font-weight: 600; letter-spacing: 0.02em; font-size: 18px; }
+.context-chip {
+  font-family: var(--mono); font-size: 11.5px;
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 10px; margin: 0 8px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip-key { color: var(--accent); }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-item {
+  font: inherit; font-size: 14.5px; font-weight: 500; text-align: left;
+  background: none; border: none; color: var(--muted);
+  border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+  padding: 9px 12px; cursor: pointer;
+}
+.nav-item:hover { color: var(--ink); }
+.nav-item.active {
+  color: var(--ink); font-weight: 600;
+  background: var(--bg);
+  border-left-color: var(--accent);
+}
+.nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.side-foot { margin-top: auto; padding: 0 8px; }
+.whoami {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.signout {
+  display: inline-block; margin-top: 6px;
+  font-size: 13px; color: var(--muted); text-decoration: none;
+}
+.signout:hover { color: var(--copper); text-decoration: underline; }
+
+.stage { max-width: 860px; margin: 0 auto; padding: 48px 32px; }
+
+/* The login page (login.html) owns the whole viewport: centered card. */
+.login-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px 24px;
+}
+.login-card {
+  max-width: 460px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 6px;
+}
+.login-brand { padding: 0; margin-bottom: 18px; }
+.login-brand .brand-mark { width: 30px; height: 30px; }
+.login-brand .brand-name { font-size: 22px; }
+.login-card .lede { margin: 6px 0 22px; }
+.login-provider { margin-top: 22px; }
+h1 { font-size: 34px; line-height: 1.15; letter-spacing: -0.015em; margin: 0 0 14px; font-weight: 600; }
+h2 { font-size: 20px; margin: 4px 0 8px; }
+.lede { font-size: 17px; color: var(--muted); max-width: 46ch; }
+.muted { color: var(--muted); }
+.small { font-size: 13.5px; }
+
+.btn {
+  display: inline-block;
+  font: inherit; font-size: 14.5px; font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 16px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary {
+  background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+}
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { border: none; background: none; color: var(--muted); font-size: 16px; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn[disabled] { opacity: 0.5; cursor: default; }
+
+.catalog-head { display: flex; align-items: baseline; justify-content: space-between; }
+
+/* Clusters view: one card per consumer cluster, keyed by its UID. */
+.cluster {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 12px 0;
+}
+.cluster-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.live-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+}
+.live-dot.stale { background: var(--copper); }
+.cluster-uid { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
+.cluster-seen { font-size: 12.5px; color: var(--muted); margin-left: auto; }
+.cluster-grant {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  border-top: 1px dashed var(--line);
+  padding: 10px 0 2px; margin-top: 10px;
+}
+.cluster-grant-export { font-weight: 600; }
+.cluster-grant-identity { font-size: 13px; color: var(--muted); }
+.cluster-grant-apis { display: flex; flex-wrap: wrap; gap: 6px; }
+.synced-count { color: var(--accent); font-weight: 600; }
+.pending-title {
+  font-family: var(--mono); font-size: 12.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--copper);
+  margin: 26px 0 8px;
+}
+.pending-row { font-size: 14px; color: var(--muted); padding: 3px 0; }
+
+/* Exports render as manifest rows: a left rule, mono API names — the list
+   reads like the document you are about to receive. */
+.collection-title {
+  font-family: var(--mono); font-size: 12.5px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+  margin: 30px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+}
+.export {
+  display: flex; gap: 18px; align-items: flex-start; justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin: 12px 0;
+}
+.export-body { min-width: 0; }
+.export-title { font-weight: 600; font-size: 17px; }
+.export-desc { color: var(--muted); margin: 3px 0 8px; font-size: 14.5px; }
+.export-apis { display: flex; flex-wrap: wrap; gap: 6px; }
+.api-name {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 5px; padding: 2px 7px;
+}
+/* Related-resource chips: same family as API chips, accent-tinted so the
+   auxiliary objects read as "comes with", not "is the API". */
+.related-chip { color: var(--accent); border-style: dashed; cursor: help; }
+.export-docs { font-size: 13px; }
+.export .btn { flex-shrink: 0; }
+
+/* Per-catalog-item synced instances, loaded on expand. */
+.instances { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.instances summary {
+  cursor: pointer; color: var(--muted); font-size: 13.5px;
+}
+.instances summary:hover { color: var(--ink); }
+.instances-list { padding: 8px 0 2px; }
+.instance-row {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 4px 0; font-size: 13.5px;
+}
+.instance-name { font-weight: 600; }
+.instance-who { margin-left: auto; }
+
+/* The bundle ticket. */
+dialog#ticket, dialog#connect {
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface); color: var(--ink);
+  padding: 0; width: min(560px, calc(100vw - 40px));
+}
+dialog#ticket::backdrop, dialog#connect::backdrop { background: rgba(20, 28, 26, 0.45); }
+/* The connect flow installs software but hands out no one-time credential,
+   so its eyebrow is calm accent, not single-use copper. */
+.connect-eyebrow { color: var(--accent); background: var(--bg); }
+#connect-apply { margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 12px; }
+#connect-apply summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+#connect-apply textarea {
+  width: 100%; font-family: var(--mono); font-size: 12px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 10px 0;
+}
+.ticket-inner { padding: 22px 26px 26px; }
+.ticket-head { display: flex; justify-content: space-between; align-items: center; }
+.ticket-eyebrow {
+  font-family: var(--mono); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--copper);
+  background: var(--copper-soft); border-radius: 999px; padding: 3px 10px;
+}
+.ticket-note { color: var(--muted); font-size: 14.5px; }
+.countdown { font-family: var(--mono); color: var(--copper); font-weight: 600; }
+.ticket-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.cmd {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; white-space: pre;
+}
+.ticket-expired { color: var(--copper); font-weight: 500; }
+
+#browser-apply { margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 12px; }
+#browser-apply summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+#browser-apply textarea {
+  width: 100%; font-family: var(--mono); font-size: 12px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 10px 0;
+}
+.check { display: block; font-size: 14px; margin: 0 0 10px; }
+
+@media (max-width: 720px) {
+  /* Sidebar collapses into a top bar. */
+  .shell { flex-direction: column; }
+  .side {
+    width: 100%; height: auto; position: static;
+    flex-direction: row; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    border-right: none; border-bottom: 1px solid var(--line);
+  }
+  .nav { flex-direction: row; margin-left: auto; }
+  .nav-item, .nav-item.active { border-left: none; border-radius: 8px; }
+  .nav-item.active { box-shadow: inset 0 -2px 0 var(--accent); }
+  .context-chip, .side-foot { display: none; }
+  .stage { padding: 32px 18px; }
+  h1 { font-size: 27px; }
+  .export { flex-direction: column; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .export { transition: border-color 120ms ease; }
+}

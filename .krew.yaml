@@ -1,0 +1,54 @@
+# krew-release-bot template for the "bind" plugin (name kept from v1 — the
+# CLI binary is kbind, installed via krew as `kubectl bind`). The bot renders
+# this on every GitHub release and opens the krew-index PR.
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: bind
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/kbind-dev/kbind
+  shortDescription: Bind a service provider's APIs into your cluster
+  description: |
+    bind binds APIs exported by a provider cluster into your cluster:
+    log in to a provider's gateway, browse its catalog, and bind a service —
+    the result is a one-apply bundle (Secret + Connection + ClusterBinding)
+    consumed by the konnector, the only component that runs on your side.
+    Everything the CLI does is reproducible by hand with curl + kubectl.
+  caveats: |
+    Typical flow:
+      kubectl bind login https://provider.example.com
+      kubectl bind connect            # install the konnector
+      kubectl bind catalog
+      kubectl bind export <name>      # or: export <name> -o yaml (GitOps)
+  platforms:
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{addURIAndSha "https://github.com/kbind-dev/kbind/releases/download/{{ .TagName }}/kubectl-bind_{{ .TagName }}_darwin_amd64.tar.gz" .TagName }}
+    bin: kubectl-bind
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    {{addURIAndSha "https://github.com/kbind-dev/kbind/releases/download/{{ .TagName }}/kubectl-bind_{{ .TagName }}_darwin_arm64.tar.gz" .TagName }}
+    bin: kubectl-bind
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{addURIAndSha "https://github.com/kbind-dev/kbind/releases/download/{{ .TagName }}/kubectl-bind_{{ .TagName }}_linux_amd64.tar.gz" .TagName }}
+    bin: kubectl-bind
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{addURIAndSha "https://github.com/kbind-dev/kbind/releases/download/{{ .TagName }}/kubectl-bind_{{ .TagName }}_linux_arm64.tar.gz" .TagName }}
+    bin: kubectl-bind
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{addURIAndSha "https://github.com/kbind-dev/kbind/releases/download/{{ .TagName }}/kubectl-bind_{{ .TagName }}_windows_amd64.tar.gz" .TagName }}
+    bin: kubectl-bind.exe

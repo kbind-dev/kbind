@@ -1,0 +1,35 @@
+kbind backend installed: {{ include "backend.fullname" . }} (namespace {{ .Release.Namespace }})
+
+Modules: gateway={{ .Values.modules.gateway }} issuer={{ .Values.modules.issuer }} reaper={{ .Values.modules.reaper }} apply={{ .Values.modules.apply }}
+
+{{- if .Values.modules.gateway }}
+
+Reach the gateway (port-forward for a quick look):
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "backend.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080          # the catalog UI
+  kbind login http://localhost:8080   # CLI login
+
+{{- if not .Values.externalURL }}
+NOTE: externalURL is not set — OIDC callbacks and pickup URLs default to
+localhost. Set it (and expose the Service) for real consumers.
+{{- end }}
+{{- if not .Values.cookieKeys.existingSecret }}
+NOTE: cookieKeys.existingSecret is not set — sessions are ephemeral and will
+not survive restarts or work across replicas.
+{{- end }}
+{{- end }}
+
+Curate the catalog by labeling exported CRDs and creating Exports:
+
+  kubectl label crd mangodbs.mangodb.io "core.kbind.io/exported=true"
+  kubectl apply -f - <<'EOF'
+  apiVersion: catalog.kbind.io/v1alpha1
+  kind: Export
+  metadata:
+    name: mangodb
+  spec:
+    title: MangoDB
+    apis:
+      - name: mangodbs.mangodb.io
+  EOF

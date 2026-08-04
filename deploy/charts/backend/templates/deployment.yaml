@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "backend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "backend.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "backend.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: backend
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if or .Values.oidc.existingSecret .Values.cookieKeys.existingSecret }}
+          env:
+            {{- if .Values.oidc.existingSecret }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.existingSecret }}
+                  key: clientSecret
+            {{- end }}
+            {{- if .Values.cookieKeys.existingSecret }}
+            - name: COOKIE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cookieKeys.existingSecret }}
+                  key: signingKey
+            - name: COOKIE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cookieKeys.existingSecret }}
+                  key: encryptionKey
+            {{- end }}
+          {{- end }}
+          args:
+            - --enable-gateway={{ .Values.modules.gateway }}
+            - --enable-issuer={{ .Values.modules.issuer }}
+            - --enable-reaper={{ .Values.modules.reaper }}
+            - --enable-apply={{ .Values.modules.apply }}
+            - --listen-address=:{{ .Values.listenPort }}
+            - --provider-name={{ .Values.providerName }}
+            {{- with .Values.externalURL }}
+            - --external-url={{ . }}
+            {{- end }}
+            {{- with .Values.externalAddress }}
+            - --external-address={{ . }}
+            {{- end }}
+            - --issuer-scope={{ .Values.issuerScope }}
+            {{- with .Values.konnectorImage }}
+            - --konnector-image={{ . }}
+            {{- end }}
+            {{- if .Values.oidc.mock }}
+            - --oidc-mock=true
+            - --oidc-mock-listen=127.0.0.1:{{ .Values.oidc.mockPort }}
+            {{- else }}
+            - --oidc-issuer-url={{ required "oidc.issuerURL is required unless oidc.mock is on" .Values.oidc.issuerURL }}
+            - --oidc-client-id={{ required "oidc.clientID is required unless oidc.mock is on" .Values.oidc.clientID }}
+            {{- if .Values.oidc.existingSecret }}
+            - --oidc-client-secret=$(OIDC_CLIENT_SECRET)
+            {{- end }}
+            - --oidc-username-claim={{ .Values.oidc.usernameClaim }}
+            {{- with .Values.oidc.groupsClaim }}
+            - --oidc-groups-claim={{ . }}
+            {{- end }}
+            - --oidc-scopes={{ .Values.oidc.scopes }}
+            {{- with .Values.oidc.redirectURL }}
+            - --oidc-redirect-url={{ . }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.kubernetesAuth }}
+            - --kubernetes-auth=true
+            {{- end }}
+            {{- if .Values.cookieKeys.existingSecret }}
+            - --cookie-signing-key=$(COOKIE_SIGNING_KEY)
+            - --cookie-encryption-key=$(COOKIE_ENCRYPTION_KEY)
+            {{- end }}
+            - --session-ttl={{ .Values.sessionTTL }}
+            - --pickup-ttl={{ .Values.pickupTTL }}
+            {{- if .Values.modules.reaper }}
+            - --reaper-ttl={{ .Values.reaper.ttl }}
+            - --reaper-revoke={{ .Values.reaper.revoke }}
+            - --reaper-delete-boundary={{ .Values.reaper.deleteBoundary }}
+            - --reaper-interval={{ .Values.reaper.interval }}
+            {{- end }}
+            - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --health-probe-bind-address=:{{ .Values.healthProbe.port }}
+            - --leader-elect={{ include "backend.leaderElect" . }}
+            - --leader-election-id={{ .Values.leaderElectionID }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            {{- if .Values.modules.gateway }}
+            - name: http
+              containerPort: {{ .Values.listenPort }}
+            {{- end }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            - name: probe
+              containerPort: {{ .Values.healthProbe.port }}
+          {{- if .Values.modules.gateway }}
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- else }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probe
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

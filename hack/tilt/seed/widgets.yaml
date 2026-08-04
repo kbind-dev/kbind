@@ -1,0 +1,101 @@
+# Demo provider content for the Tilt dev loop: one exported CRD, its related
+# resources, and the catalog entry — same canonical Widget as config/samples.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.org
+  labels:
+    core.kbind.io/exported: "true"
+spec:
+  group: example.org
+  names:
+    plural: widgets
+    singular: widget
+    kind: Widget
+    listKind: WidgetList
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                size:
+                  type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+      additionalPrinterColumns:
+        - name: Size
+          type: string
+          jsonPath: .spec.size
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+---
+# Related resources the widgets service ships alongside its API: connection
+# details as a Secret and tuning as a ConfigMap, synced provider -> consumer.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: widgets-connection
+  namespace: default
+  labels:
+    widgets.example.org/related: "true"
+stringData:
+  endpoint: https://widgets.internal.example.org
+  api-key: demo-not-a-real-key
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: widgets-tuning
+  namespace: default
+  labels:
+    widgets.example.org/related: "true"
+data:
+  pointiness: "11"
+---
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Export
+metadata:
+  name: widgets
+spec:
+  title: Widgets
+  description: Managed widgets with automated pointiness.
+  apis:
+    - name: widgets.example.org
+  defaults:
+    relatedResources:
+      - group: ""
+        resource: secrets
+        direction: FromProvider
+        selector:
+          labelSelector:
+            matchLabels:
+              widgets.example.org/related: "true"
+      - group: ""
+        resource: configmaps
+        direction: FromProvider
+        selector:
+          labelSelector:
+            matchLabels:
+              widgets.example.org/related: "true"
+---
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Collection
+metadata:
+  name: hardware
+spec:
+  title: Hardware
+  exports:
+    - name: widgets

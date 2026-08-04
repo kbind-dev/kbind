@@ -1,0 +1,103 @@
+# -*- mode: Python -*-
+# kbind dev loop across two kind clusters (run hack/tilt/kind.sh first).
+#
+# Tilt drives exactly one kube-context, so:
+#   - the PROVIDER cluster (kind-kbind-provider, the current context) is
+#     managed natively: backend image (auto kind-load), backend chart,
+#     port-forwards, rebuild-on-change;
+#   - the CONSUMER cluster (kind-kbind-consumer) is driven via
+#     local_resources: konnector image -> kind load -> helm upgrade.
+#
+# After `tilt up`:
+#   open http://localhost:8080            # gateway UI (mock OIDC, auto-approves)
+#   kbind login http://localhost:8080
+#   kbind bind widgets --kubeconfig ~/.kube/config \
+#     --server http://localhost:8080      # consumer context: kind-kbind-consumer
+
+allow_k8s_contexts('kind-kbind-provider')
+if k8s_context() != 'kind-kbind-provider':
+    fail('current kube-context is %s; run hack/tilt/kind.sh (it switches to kind-kbind-provider)' % k8s_context())
+
+# ---------------------------------------------------------------- provider --
+
+docker_build(
+    'ghcr.io/kbind/backend',
+    '../..',
+    dockerfile='../../Dockerfile',
+    target='backend',
+    only=['cmd', 'engine', 'backend', 'cli', 'pkg', 'web', 'sdk', 'go.mod', 'go.sum'],
+)
+
+k8s_yaml(blob("""
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kbind-system
+"""))
+
+k8s_yaml(helm(
+    '../../deploy/charts/backend',
+    name='backend',
+    namespace='kbind-system',
+    set=[
+        'oidc.mock=true',
+        'externalURL=http://localhost:8080',
+        # Issued kubeconfigs must point at an address the CONSUMER cluster
+        # can reach: the provider control-plane container on the shared
+        # "kind" docker network.
+        'externalAddress=https://kbind-provider-control-plane:6443',
+        'modules.apply=true',
+    ],
+))
+
+k8s_resource(
+    'backend',
+    # 8080 = gateway (UI/API), 5556 = the in-pod mock OIDC issuer so the host
+    # browser can complete the login redirect.
+    port_forwards=['8080:8080', '5556:5556'],
+    labels=['provider'],
+)
+
+# Demo catalog content (waits for the backend so the catalog CRDs exist).
+local_resource(
+    'seed-catalog',
+    cmd=' && '.join([
+        'kubectl --context kind-kbind-provider wait --for condition=established crd/exports.catalog.kbind.io --timeout=120s',
+        'kubectl --context kind-kbind-provider apply -f seed/',
+    ]),
+    deps=['seed'],
+    resource_deps=['backend'],
+    labels=['provider'],
+)
+
+# ---------------------------------------------------------------- consumer --
+
+local_resource(
+    'konnector-image',
+    cmd=' && '.join([
+        'docker build --target konnector -t ghcr.io/kbind/konnector:tilt ../..',
+        'kind load docker-image ghcr.io/kbind/konnector:tilt --name kbind-consumer',
+    ]),
+    deps=['../../cmd/konnector', '../../engine', '../../sdk/apis', '../../go.mod'],
+    labels=['consumer'],
+)
+
+local_resource(
+    'konnector',
+    cmd=' && '.join([
+        'helm upgrade --install konnector ../../deploy/charts/konnector'
+        + ' --kube-context kind-kbind-consumer --namespace kbind --create-namespace'
+        + ' --set image.repository=ghcr.io/kbind/konnector --set image.tag=tilt',
+        'kubectl --context kind-kbind-consumer -n kbind rollout restart deployment/konnector',
+        'kubectl --context kind-kbind-consumer -n kbind rollout status deployment/konnector --timeout=120s',
+    ]),
+    resource_deps=['konnector-image'],
+    labels=['consumer'],
+)
+
+local_resource(
+    'konnector-logs',
+    serve_cmd='kubectl --context kind-kbind-consumer -n kbind logs -f deployment/konnector',
+    resource_deps=['konnector'],
+    labels=['consumer'],
+)

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: backend
+description: kbind v2 backend — the optional provider-side service layer (gateway, issuer, reaper).
+type: application
+
+# version / appVersion are placeholders bumped by the release tooling.
+version: 0.0.0
+appVersion: "0.0.0"
+
+home: https://kbind.io
+sources:
+  - https://github.com/kbind/kbind
+keywords:
+  - kbind
+  - multicluster
+  - api-binding

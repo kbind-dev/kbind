@@ -1,6 +1,15 @@
 # A consumer-side instance. Apply on the CONSUMER cluster after the binding is
-# Ready (the Widget CRD will have been pulled from the provider). The konnector
-# syncs this object's spec up to the provider; provider status flows back here.
+# Ready (the Widget CRD will have been pulled from the provider).
+#
+# The konnector syncs this object's spec up to the provider; provider status
+# flows back here. Alongside it, the binding's related resources (the
+# provider's widgets-connection Secret and widgets-tuning ConfigMap) land in
+# this cluster's default namespace:
+#
+#   kubectl get widget my-widget -o jsonpath='{.status.phase}'
+#   kubectl -n default get secret widgets-connection
+#   kubectl -n default get configmap widgets-tuning
+---
 apiVersion: example.org/v1
 kind: Widget
 metadata:
@@ -8,3 +17,26 @@ metadata:
   namespace: default
 spec:
   size: large
+---
+# Related resources: connection details and tuning the service hands to every
+# consumer. Anything matching the binding's selector syncs to the consumer.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: widgets-connection
+  namespace: default
+  labels:
+    widgets.example.org/related: "true"
+stringData:
+  endpoint: https://widgets.internal.example.org
+  api-key: demo-not-a-real-key
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: widgets-tuning
+  namespace: default
+  labels:
+    widgets.example.org/related: "true"
+data:
+  pointiness: "11"
