@@ -27,9 +27,10 @@ const (
 	// the provider.
 	LabelManaged = "core.kbind.io/managed"
 
-	// AnnotationConnection records, on a pulled consumer CRD, the name of the
-	// Connection whose provider it was pulled from. The sync engine uses it to
-	// pin the provider cluster for that API.
+	// AnnotationConnection records the name of the Connection.
+	// Used on pulled consumer CRD so that the sync engine can pin
+	// the provider cluster for that API. It's also used on Leases to maintain
+	// the link between consumer's Connection and provider's Lease.
 	AnnotationConnection = "core.kbind.io/connection"
 
 	// AnnotationConsumerClusterUID records the consumer cluster identity on a
