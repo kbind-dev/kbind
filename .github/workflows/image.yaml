@@ -1,7 +1,8 @@
 name: Image
 
-# Build and push the konnector + backend images. Pushes only on tags:
+# Build and push the konnector + backend images and Helm charts on tags:
 #   - tags v* -> ghcr.io/<owner>/konnector:<version>, ghcr.io/<owner>/backend:<version>
+#   - tags v* -> oci://ghcr.io/kbind/charts/{konnector,backend}:<version>
 # No :latest or :<sha> tags — the image repo is shared with v1/main images.
 on:
   push:
@@ -47,3 +48,21 @@ jobs:
             --push \
             .
         done
+
+  publish-chart:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - name: Install Helm
+      uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+    - name: Log in to GHCR for Helm
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+    - name: Version from tag
+      id: v
+      run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+    - name: Package and push Helm charts (OCI)
+      run: make helm-push VERSION=${{ steps.v.outputs.version }}

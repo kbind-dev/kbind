@@ -150,3 +150,25 @@ tilt-ci:
 tilt-down:
 	kind delete cluster --name kbind-provider || true
 	kind delete cluster --name kbind-consumer || true
+
+# Helm publishing parameters
+HELM ?= helm
+HELM_REPO ?= ghcr.io/kbind/charts
+VERSION ?= 0.0.0-dev
+CHART_VERSION ?= $(VERSION)
+IMAGE_VERSION ?= $(VERSION)
+HELM_CHARTS ?= konnector backend
+
+## helm-push: Package and push Helm charts to $(HELM_REPO) as OCI artifacts
+.PHONY: helm-push
+helm-push:
+	mkdir -p bin/charts
+	@for chart in $(HELM_CHARTS); do \
+	  echo "==> packaging $$chart $(CHART_VERSION)"; \
+	  $(HELM) package deploy/charts/$$chart \
+	    --version $(CHART_VERSION) \
+	    --app-version $(IMAGE_VERSION) \
+	    --destination bin/charts || exit 1; \
+	  echo "==> pushing $$chart-$(CHART_VERSION).tgz to oci://$(HELM_REPO)"; \
+	  $(HELM) push bin/charts/$$chart-$(CHART_VERSION).tgz oci://$(HELM_REPO) || exit 1; \
+	done
