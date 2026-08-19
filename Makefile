@@ -19,8 +19,8 @@ CONTROLLER_GEN ?= go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2
 GOLANGCI_LINT  ?= golangci-lint
 ENVTEST_K8S_VERSION ?= 1.34.1
 SETUP_ENVTEST  ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.21
-CHART ?= deploy/charts/konnector
-BACKEND_CHART ?= deploy/charts/backend
+CHART ?= deploy/charts/konnector-v2
+BACKEND_CHART ?= deploy/charts/backend-v2
 IMAGE ?= ghcr.io/kbind/konnector:dev
 
 .PHONY: all
@@ -157,7 +157,7 @@ HELM_REPO ?= ghcr.io/kbind/charts
 VERSION ?= 0.0.0-dev
 CHART_VERSION ?= $(VERSION)
 IMAGE_VERSION ?= $(VERSION)
-HELM_CHARTS ?= konnector backend
+HELM_CHARTS ?= konnector-v2 backend-v2
 
 ## helm-push: Package and push Helm charts to $(HELM_REPO) as OCI artifacts
 .PHONY: helm-push

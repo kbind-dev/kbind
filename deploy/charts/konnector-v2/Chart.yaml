@@ -1,6 +1,6 @@
 apiVersion: v2
-name: backend
-description: kbind v2 backend — the optional provider-side service layer (gateway, issuer, reaper).
+name: konnector-v2
+description: kbind v2 slim-core konnector — the consumer-side sync engine.
 type: application
 
 # version / appVersion are placeholders bumped by the release tooling.

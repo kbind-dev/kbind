@@ -2,7 +2,7 @@ name: Image
 
 # Build and push the konnector + backend images and Helm charts on tags:
 #   - tags v* -> ghcr.io/<owner>/konnector:<version>, ghcr.io/<owner>/backend:<version>
-#   - tags v* -> oci://ghcr.io/kbind/charts/{konnector,backend}:<version>
+#   - tags v* -> oci://ghcr.io/kbind/charts/{konnector-v2,backend-v2}:<version>
 # No :latest or :<sha> tags — the image repo is shared with v1/main images.
 on:
   push:
