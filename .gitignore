@@ -5,6 +5,8 @@ coverage.*
 *.iml
 .DS_Store
 .env
+.venv
+__pycache__/
 *.kubeconfig
 .kcp
 .kube-bind

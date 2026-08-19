@@ -1,4 +1,4 @@
-# Copyright 2026 The Kbind Authors.
+# Copyright 2026 The kbind Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -117,6 +117,11 @@ lint:
 tidy:
 	GOWORK=off go mod tidy
 	cd sdk && GOWORK=off go mod tidy
+
+# Generate Apache license headers on source files.
+.PHONY: generate-boilerplate
+generate-boilerplate:
+	python3 hack/generate_boilerplate.py --boilerplate-dir=hack/boilerplate
 
 # Verify Apache license headers on source files.
 .PHONY: verify-boilerplate
