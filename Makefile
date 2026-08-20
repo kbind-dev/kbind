@@ -158,7 +158,7 @@ tilt-down:
 
 # Helm publishing parameters
 HELM ?= helm
-HELM_REPO ?= ghcr.io/kbind/charts
+HELM_REPO ?= ghcr.io/kbind-dev/charts
 VERSION ?= 0.0.0-dev
 CHART_VERSION ?= $(VERSION)
 IMAGE_VERSION ?= $(VERSION)
