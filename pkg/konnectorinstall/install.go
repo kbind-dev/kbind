@@ -39,7 +39,7 @@ import (
 var manifests embed.FS
 
 // DefaultImage is the konnector image installed when none is specified.
-const DefaultImage = "ghcr.io/kbind/konnector:latest"
+const DefaultImage = "ghcr.io/kbind-dev/konnector:latest"
 
 // Manifests returns the full konnector install (CRDs first, then namespace,
 // RBAC and Deployment) as one YAML multi-doc with the image resolved.

@@ -1,7 +1,7 @@
 # Default values for the konnector chart.
 
 image:
-  repository: ghcr.io/kbind/konnector
+  repository: ghcr.io/kbind-dev/konnector
   # Defaults to the chart appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

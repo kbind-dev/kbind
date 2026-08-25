@@ -2,7 +2,7 @@
 # **provider** cluster.
 
 image:
-  repository: ghcr.io/kbind/backend
+  repository: ghcr.io/kbind-dev/backend
   # Defaults to the chart appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

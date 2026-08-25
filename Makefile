@@ -21,7 +21,7 @@ ENVTEST_K8S_VERSION ?= 1.34.1
 SETUP_ENVTEST  ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.21
 CHART ?= deploy/charts/konnector-v2
 BACKEND_CHART ?= deploy/charts/backend-v2
-IMAGE ?= ghcr.io/kbind/konnector:dev
+IMAGE ?= ghcr.io/kbind-dev/konnector:dev
 
 .PHONY: all
 all: codegen build
@@ -54,7 +54,7 @@ cli-snapshot:
 image:
 	docker build -t $(IMAGE) .
 
-BACKEND_IMAGE ?= ghcr.io/kbind/backend:dev
+BACKEND_IMAGE ?= ghcr.io/kbind-dev/backend:dev
 .PHONY: image-backend
 image-backend:
 	docker build --target backend -t $(BACKEND_IMAGE) .
@@ -161,7 +161,6 @@ HELM ?= helm
 HELM_REPO ?= ghcr.io/kbind-dev/charts
 VERSION ?= 0.0.0-dev
 CHART_VERSION ?= $(VERSION)
-IMAGE_VERSION ?= $(VERSION)
 HELM_CHARTS ?= konnector-v2 backend-v2
 
 ## helm-push: Package and push Helm charts to $(HELM_REPO) as OCI artifacts
