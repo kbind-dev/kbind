@@ -21,7 +21,7 @@ if k8s_context() != 'kind-kbind-provider':
 # ---------------------------------------------------------------- provider --
 
 docker_build(
-    'ghcr.io/kbind/backend',
+    'ghcr.io/kbind-dev/backend',
     '../..',
     dockerfile='../../Dockerfile',
     target='backend',
@@ -75,8 +75,8 @@ local_resource(
 local_resource(
     'konnector-image',
     cmd=' && '.join([
-        'docker build --target konnector -t ghcr.io/kbind/konnector:tilt ../..',
-        'kind load docker-image ghcr.io/kbind/konnector:tilt --name kbind-consumer',
+        'docker build --target konnector -t ghcr.io/kbind-dev/konnector:tilt ../..',
+        'kind load docker-image ghcr.io/kbind-dev/konnector:tilt --name kbind-consumer',
     ]),
     deps=['../../cmd/konnector', '../../engine', '../../sdk/apis', '../../go.mod'],
     labels=['consumer'],
@@ -87,7 +87,7 @@ local_resource(
     cmd=' && '.join([
         'helm upgrade --install konnector ../../deploy/charts/konnector'
         + ' --kube-context kind-kbind-consumer --namespace kbind --create-namespace'
-        + ' --set image.repository=ghcr.io/kbind/konnector --set image.tag=tilt',
+        + ' --set image.repository=ghcr.io/kbind-dev/konnector --set image.tag=tilt',
         'kubectl --context kind-kbind-consumer -n kbind rollout restart deployment/konnector',
         'kubectl --context kind-kbind-consumer -n kbind rollout status deployment/konnector --timeout=120s',
     ]),

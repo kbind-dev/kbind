@@ -194,10 +194,10 @@ The konnector runs in (or against) the **consumer** cluster — it is the only
 running component of the core (no backend, no provider-side controllers).
 
 ```sh
-make image IMAGE=ghcr.io/kbind/konnector:dev          # build the image
+make image IMAGE=ghcr.io/kbind-dev/konnector:dev          # build the image
 helm install konnector deploy/charts/konnector \
   -n kbind --create-namespace \
-  --set image.repository=ghcr.io/kbind/konnector --set image.tag=dev
+  --set image.repository=ghcr.io/kbind-dev/konnector --set image.tag=dev
 ```
 
 The chart ([deploy/charts/konnector](deploy/charts/konnector)) ships the core
@@ -220,7 +220,7 @@ The **backend** deploys on the provider with its own chart
 ([deploy/charts/backend](deploy/charts/backend)):
 
 ```sh
-make image-backend BACKEND_IMAGE=ghcr.io/kbind/backend:dev
+make image-backend BACKEND_IMAGE=ghcr.io/kbind-dev/backend:dev
 helm install backend deploy/charts/backend \
   -n kbind-system --create-namespace \
   --set externalURL=https://kbind.example.com \
