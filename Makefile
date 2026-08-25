@@ -161,6 +161,7 @@ HELM ?= helm
 HELM_REPO ?= ghcr.io/kbind-dev/charts
 VERSION ?= 0.0.0-dev
 CHART_VERSION ?= $(VERSION)
+IMAGE_VERSION ?= v$(VERSION)
 HELM_CHARTS ?= konnector-v2 backend-v2
 
 ## helm-push: Package and push Helm charts to $(HELM_REPO) as OCI artifacts
