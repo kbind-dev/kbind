@@ -36,7 +36,7 @@ ENV VITE_BUILD_TARGET=docker
 RUN npm run build
 
 # Build Go binary with embedded UI assets
-FROM golang:1.26.2 AS go-build-env
+FROM golang:1.26.5 AS go-build-env
 WORKDIR /app
 
 # Accept build arguments for multi-arch support
