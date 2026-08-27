@@ -53,21 +53,23 @@ func TestSlimCoreOpenAPISource(t *testing.T) {
 		return conn.Status.Conditions, err
 	}, corev1alpha1.ConditionReady)
 
-	t.Run("Connection synthesizes and installs the CRD via OpenAPI", func(t *testing.T) {
+	t.Run("Connection discovers via OpenAPI but installs no unbound CRD (pullPolicy: Bound)", func(t *testing.T) {
 		conn := &corev1alpha1.Connection{}
 		require.NoError(t, env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "demo-provider"}, conn))
 		require.Equal(t, corev1alpha1.SchemaSourceOpenAPI, conn.Status.ActiveSchemaSource)
 		_, ok := conn.Status.ExportsAPI(widgetCRDName)
 		require.True(t, ok, "OpenAPI discovery should export %s", widgetCRDName)
 
+		// Under the default pullPolicy: Bound the Connection populates
+		// exportedAPIs but installs nothing — install is deferred to a binding.
+		// (This keeps a provider's built-in groups, e.g. kcp's *.kcp.io, off the
+		// consumer unless a binding references them.)
 		crd := &apiextensionsv1.CustomResourceDefinition{}
-		require.Eventually(t, func() bool {
-			return env.ConsumerClient.Get(ctx, client.ObjectKey{Name: widgetCRDName}, crd) == nil
-		}, 30*time.Second, 200*time.Millisecond, "the synthesized CRD should be installed on the consumer")
-		require.Equal(t, "true", crd.Labels[corev1alpha1.LabelManaged])
+		err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: widgetCRDName}, crd)
+		require.True(t, apierrors.IsNotFound(err), "the synthesized CRD must not be installed before a binding references it")
 	})
 
-	t.Run("a binding syncs an instance over the synthesized CRD", func(t *testing.T) {
+	t.Run("a binding installs the synthesized CRD and syncs an instance", func(t *testing.T) {
 		require.NoError(t, env.ConsumerClient.Create(ctx, &corev1alpha1.ClusterBinding{
 			ObjectMeta: metav1.ObjectMeta{Name: "widgets"},
 			Spec: corev1alpha1.BindingSpec{
@@ -80,6 +82,13 @@ func TestSlimCoreOpenAPISource(t *testing.T) {
 			err := env.ConsumerClient.Get(ctx, client.ObjectKey{Name: "widgets"}, cb)
 			return cb.Status.Conditions, err
 		}, corev1alpha1.ConditionReady)
+
+		// The binding installed the synthesized CRD on demand (pullPolicy: Bound).
+		crd := &apiextensionsv1.CustomResourceDefinition{}
+		require.Eventually(t, func() bool {
+			return env.ConsumerClient.Get(ctx, client.ObjectKey{Name: widgetCRDName}, crd) == nil
+		}, 30*time.Second, 200*time.Millisecond, "the binding should install the synthesized CRD")
+		require.Equal(t, "true", crd.Labels[corev1alpha1.LabelManaged])
 
 		consumerWidgets := env.ConsumerDyn.Resource(gvr).Namespace(instanceNS)
 		providerWidgets := env.ProviderDyn.Resource(gvr).Namespace(instanceNS)

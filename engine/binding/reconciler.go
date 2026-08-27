@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kbind/kbind/engine/crdpull"
+	"github.com/kbind/kbind/engine/openapi"
 	"github.com/kbind/kbind/engine/remote"
 	corev1alpha1 "github.com/kbind/kbind/sdk/apis/core/v1alpha1"
 )
@@ -110,13 +111,31 @@ func (b *base) reconcileAccessor(ctx context.Context, obj corev1alpha1.BindingAc
 		}
 		var hash string
 		if conn.Status.ActiveSchemaSource == corev1alpha1.SchemaSourceOpenAPI {
-			// CRD-less provider: the Connection synthesized + installed the CRD.
-			// The binding just consumes it (no provider apiextensions to read).
+			// CRD-less provider (kcp): install the CRD for THIS bound API only
+			// (unless pullPolicy: None, where the user manages CRDs). The Connection
+			// no longer installs the whole discovery set, so the provider's built-in
+			// groups (e.g. *.kcp.io) never reach the consumer — only what a binding
+			// references does.
 			crd := &apiextensionsv1.CustomResourceDefinition{}
-			if err := b.client.Get(ctx, client.ObjectKey{Name: api.Name}, crd); err != nil {
+			err := b.client.Get(ctx, client.ObjectKey{Name: api.Name}, crd)
+			if apierrors.IsNotFound(err) && conn.Spec.Schema.PullPolicy != corev1alpha1.PullPolicyNone {
+				cfg, cerr := remote.RestConfigFromConnection(ctx, b.client, conn)
+				if cerr != nil {
+					return fmt.Errorf("provider rest config: %w", cerr)
+				}
+				synth, serr := openapi.SynthesizeCRD(ctx, cfg, api.Name)
+				if serr != nil {
+					return fmt.Errorf("synthesizing CRD %q: %w", api.Name, serr)
+				}
+				if _, ierr := crdpull.Install(ctx, b.client, synth, conn.Name, conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce); ierr != nil {
+					return fmt.Errorf("installing synthesized CRD %q: %w", api.Name, ierr)
+				}
+				err = b.client.Get(ctx, client.ObjectKey{Name: api.Name}, crd)
+			}
+			if err != nil {
 				if apierrors.IsNotFound(err) {
-					// The API is exported, but the Connection has not installed the
-					// synthesized CRD yet — a transient wait, not "not exported".
+					// Exported but the CRD is not present yet (pullPolicy: None until
+					// the user applies it) — a transient wait, not "not exported".
 					pendingSchema = append(pendingSchema, api.Name)
 					continue
 				}

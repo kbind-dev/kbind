@@ -140,6 +140,22 @@ func SynthesizeCRDs(ctx context.Context, cfg *rest.Config) ([]*apiextensionsv1.C
 	return out, nil
 }
 
+// SynthesizeCRD synthesizes the single CRD named "<plural>.<group>", for
+// on-demand install of one bound API (schema.source: OpenAPI, pullPolicy: Bound).
+// Returns an error if the provider does not export that resource.
+func SynthesizeCRD(ctx context.Context, cfg *rest.Config, name string) (*apiextensionsv1.CustomResourceDefinition, error) {
+	crds, err := SynthesizeCRDs(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	for _, crd := range crds {
+		if crd.Name == name {
+			return crd, nil
+		}
+	}
+	return nil, fmt.Errorf("provider does not export %q", name)
+}
+
 func buildCRD(gr schema.GroupResource, versions []crdVersionInfo, preferredVer string) *apiextensionsv1.CustomResourceDefinition {
 	// Keep deterministic order so that we don't trigger updates without actually changing the schema.
 	sort.SliceStable(versions, func(i, j int) bool {
