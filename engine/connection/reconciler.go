@@ -221,14 +221,32 @@ func (r *Reconciler) reconcile(ctx context.Context, conn *corev1alpha1.Connectio
 	setCondition(conn, corev1alpha1.ConditionPermissionDenied, metav1.ConditionFalse, corev1alpha1.ReasonAsExpected, "no RBAC denials")
 
 	// pullPolicy: All — eagerly install every exported CRD on the consumer,
-	// without waiting for a binding. (Bound/None defer to the binding.)
+	// without waiting for a binding. (Bound/None defer to the binding.) The CRD
+	// source pulls the provider CRD object; the OpenAPI source has no CRD object
+	// to pull, so it synthesizes and installs.
 	if conn.Spec.Schema.PullPolicy == corev1alpha1.PullPolicyAll {
-		for i := range exported {
-			if _, _, err := crdpull.Pull(ctx, r.Client, providerClient, exported[i].Name, conn.Name, crdpull.Options{
-				Create: true,
-				Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
-			}); err != nil {
-				return fmt.Errorf("eager-pulling CRD %q: %w", exported[i].Name, err)
+		if source == corev1alpha1.SchemaSourceOpenAPI {
+			cfg, err := remote.RestConfigFromConnection(ctx, r.Client, conn)
+			if err != nil {
+				return fmt.Errorf("provider rest config: %w", err)
+			}
+			crds, err := openapi.SynthesizeCRDs(ctx, cfg)
+			if err != nil {
+				return fmt.Errorf("synthesizing CRDs: %w", err)
+			}
+			for _, crd := range crds {
+				if _, err := crdpull.Install(ctx, r.Client, crd, conn.Name, conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce); err != nil {
+					return fmt.Errorf("eager-installing CRD %q: %w", crd.Name, err)
+				}
+			}
+		} else {
+			for i := range exported {
+				if _, _, err := crdpull.Pull(ctx, r.Client, providerClient, exported[i].Name, conn.Name, crdpull.Options{
+					Create: true,
+					Update: conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce,
+				}); err != nil {
+					return fmt.Errorf("eager-pulling CRD %q: %w", exported[i].Name, err)
+				}
 			}
 		}
 	}
@@ -460,10 +478,12 @@ func (r *Reconciler) bindingsReferencing(ctx context.Context, name string) (int,
 // discoverExportedCRDs lists provider CRDs carrying the exported label and maps
 // them to ExportedAPI entries.
 // discoverAndInstall resolves the schema source and returns the active source +
-// exported APIs. For CRD it lists label-gated provider CRDs (the binding pulls
-// them later); for OpenAPI it synthesizes CRDs from discovery + /openapi/v3 and
-// installs them on the consumer (CRD-less providers like kcp). Auto probes CRD
-// first and falls back to OpenAPI.
+// exported APIs. It NEVER installs here: installation is gated by pullPolicy
+// (All: eager in Reconcile; Bound: the binding installs only referenced APIs;
+// None: never), identically for both sources. For CRD it lists label-gated
+// provider CRDs; for OpenAPI it synthesizes candidate CRDs from discovery +
+// /openapi/v3 (CRD-less providers like kcp) purely to populate exportedAPIs.
+// Auto probes CRD first and falls back to OpenAPI.
 func (r *Reconciler) discoverAndInstall(ctx context.Context, conn *corev1alpha1.Connection, providerClient client.Client) (corev1alpha1.SchemaSource, []corev1alpha1.ExportedAPI, error) {
 	src := conn.Spec.Schema.Source
 	if src == "" {
@@ -481,7 +501,12 @@ func (r *Reconciler) discoverAndInstall(ctx context.Context, conn *corev1alpha1.
 		// Auto with no labeled CRDs → fall through to OpenAPI.
 	}
 
-	// OpenAPI: synthesize CRDs from discovery + /openapi/v3 and install them.
+	// OpenAPI: synthesize candidate CRDs from discovery + /openapi/v3 to populate
+	// exportedAPIs. Do NOT install here — installation is pullPolicy-gated (see
+	// Reconcile for All, the binding for Bound). This keeps the provider's
+	// built-in groups (e.g. kcp's *.kcp.io) off the consumer unless a binding
+	// references them, while still letting the binding go Ready (the API is in
+	// exportedAPIs) so status + related-resource sync work.
 	cfg, err := remote.RestConfigFromConnection(ctx, r.Client, conn)
 	if err != nil {
 		return "", nil, err
@@ -492,9 +517,6 @@ func (r *Reconciler) discoverAndInstall(ctx context.Context, conn *corev1alpha1.
 	}
 	exported := make([]corev1alpha1.ExportedAPI, 0, len(crds))
 	for _, crd := range crds {
-		if _, err := crdpull.Install(ctx, r.Client, crd, conn.Name, conn.Spec.Schema.UpdatePolicy != corev1alpha1.UpdatePolicyOnce); err != nil {
-			return "", nil, fmt.Errorf("installing synthesized CRD %q: %w", crd.Name, err)
-		}
 		versions := make([]string, len(crd.Spec.Versions))
 		for i, v := range crd.Spec.Versions {
 			versions[i] = v.Name
