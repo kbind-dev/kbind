@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v260220-f03e1ee.apiserviceexportrequests.kube-bind.io
+  name: v260608-edcd0b51.apiserviceexportrequests.kube-bind.io
 spec:
   conversion:
     strategy: None
@@ -384,6 +384,10 @@ spec:
               x-kubernetes-validations:
               - message: permissionClaims are immutable
                 rule: self == oldSelf
+              - message: Resource is not a valid claimable API
+                rule: self.all(c, (c.group == '' && c.resource == 'configmaps') ||
+                  (c.group == '' && c.resource == 'secrets') || (c.group == '' &&
+                  c.resource == 'serviceaccounts'))
             resources:
               description: resources is a list of resources that should be exported.
               items:
