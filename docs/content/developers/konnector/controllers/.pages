@@ -1,0 +1,5 @@
+nav:
+  - konnector.md
+  - connection.md
+  - binding.md
+  - synchronization.md

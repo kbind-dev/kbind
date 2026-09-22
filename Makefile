@@ -22,6 +22,8 @@ SETUP_ENVTEST  ?= go run sigs.k8s.io/controller-runtime/tools/setup-envtest@rele
 CHART ?= deploy/charts/konnector-v2
 BACKEND_CHART ?= deploy/charts/backend-v2
 IMAGE ?= ghcr.io/kbind-dev/konnector:dev
+DOCS_VENV ?= $(CURDIR)/docs/.venv
+CRD_REF_DOCS ?= go run github.com/elastic/crd-ref-docs@v0.3.0
 
 .PHONY: all
 all: codegen build
@@ -177,3 +179,36 @@ helm-push:
 	  echo "==> pushing $$chart-$(CHART_VERSION).tgz to oci://$(HELM_REPO)"; \
 	  $(HELM) push bin/charts/$$chart-$(CHART_VERSION).tgz oci://$(HELM_REPO) || exit 1; \
 	done
+
+.PHONY: docs-venv
+docs-venv:
+	python3 -m venv $(DOCS_VENV)
+	$(DOCS_VENV)/bin/python -m pip install --upgrade pip
+	$(DOCS_VENV)/bin/python -m pip install -r docs/requirements.txt
+
+.PHONY: generate-cli-docs
+generate-cli-docs:
+	mkdir -p docs/content/reference/cli
+	go run ./docs/generators/cli-doc > docs/content/reference/cli/index.md
+
+.PHONY: generate-api-docs
+generate-api-docs:
+	mkdir -p docs/content/reference/crd
+	$(CRD_REF_DOCS) --source-path=./sdk/apis \
+		--config=docs/generators/crd-ref/config.yaml --renderer=markdown \
+		--output-path=docs/content/reference/crd/index.md
+
+.PHONY: generate-docs
+generate-docs: generate-cli-docs generate-api-docs
+
+.PHONY: build-docs
+build-docs: generate-docs
+	cd docs && $(DOCS_VENV)/bin/mkdocs build --strict
+
+.PHONY: serve-docs
+serve-docs: generate-docs
+	cd docs && $(DOCS_VENV)/bin/mkdocs serve
+
+.PHONY: deploy-docs
+deploy-docs: build-docs
+	PATH="$(DOCS_VENV)/bin:$$PATH" bash docs/scripts/deploy-docs.sh

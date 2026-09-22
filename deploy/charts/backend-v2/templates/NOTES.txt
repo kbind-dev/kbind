@@ -8,14 +8,14 @@ Reach the gateway (port-forward for a quick look):
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "backend.fullname" . }} 8080:{{ .Values.service.port }}
   open http://localhost:8080          # the catalog UI
-  kbind login http://localhost:8080   # CLI login
+  kubectl bind login http://localhost:8080   # CLI login
 
 {{- if not .Values.externalURL }}
-NOTE: externalURL is not set — OIDC callbacks and pickup URLs default to
+NOTE: externalURL is not set, OIDC callbacks and pickup URLs default to
 localhost. Set it (and expose the Service) for real consumers.
 {{- end }}
 {{- if not .Values.cookieKeys.existingSecret }}
-NOTE: cookieKeys.existingSecret is not set — sessions are ephemeral and will
+NOTE: cookieKeys.existingSecret is not set, sessions are ephemeral and will
 not survive restarts or work across replicas.
 {{- end }}
 {{- end }}
