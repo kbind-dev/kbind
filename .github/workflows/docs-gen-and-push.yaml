@@ -1,0 +1,89 @@
+name: Docs
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - v2-next
+    paths:
+      - "docs/**"
+      - "cli/**"
+      - "cmd/**"
+      - "backend/**"
+      - "engine/**"
+      - "pkg/**"
+      - "deploy/charts/**"
+      - "sdk/apis/**"
+      - "go.mod"
+      - "go.sum"
+      - "sdk/go.mod"
+      - "sdk/go.sum"
+      - "Makefile"
+      - ".github/workflows/docs-gen-and-push.yaml"
+  push:
+    branches:
+      - v2-next
+      - docs-v2
+    paths:
+      - "docs/**"
+      - "cli/**"
+      - "cmd/**"
+      - "backend/**"
+      - "engine/**"
+      - "pkg/**"
+      - "deploy/charts/**"
+      - "sdk/apis/**"
+      - "go.mod"
+      - "go.sum"
+      - "sdk/go.mod"
+      - "sdk/go.sum"
+      - "Makefile"
+      - ".github/workflows/docs-gen-and-push.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: make docs-venv build-docs
+
+  publish:
+    if: >-
+      github.repository == 'kbind-dev/kbind' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/v2-next' || github.ref == 'refs/heads/docs-v2')
+    needs: build
+    permissions:
+      contents: write
+    concurrency:
+      group: Docs
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - name: Publish preview without changing latest
+        env:
+          PUSH: "1"
+        run: |
+          git config user.name "kbind-ci-bot"
+          git config user.email "no-reply@kbind.dev"
+          make docs-venv deploy-docs
