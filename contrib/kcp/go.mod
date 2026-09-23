@@ -12,7 +12,7 @@ replace (
 require (
 	github.com/google/uuid v1.6.0
 	github.com/kcp-dev/client-go v0.31.0
-	github.com/kcp-dev/kcp v0.31.0
+	github.com/kcp-dev/kcp v0.31.4
 	github.com/kcp-dev/logicalcluster/v3 v3.0.5
 	github.com/kcp-dev/sdk v0.31.0
 	github.com/kube-bind/kube-bind v0.7.1
