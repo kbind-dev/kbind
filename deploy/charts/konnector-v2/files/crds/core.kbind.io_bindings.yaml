@@ -65,7 +65,7 @@ spec:
                   description: |-
                     APIRef identifies an exported API by its CRD name on the provider,
                     i.e. "<plural>.<group>" (for example "mangodbs.mangodb.io"). Under the
-                    OpenAPI schema source there is no CRD object behind the name; it is still
+                    OpenAPI schema source there is no CRD object behind the name, it is still
                     just resource + group.
                   properties:
                     name:
@@ -81,7 +81,7 @@ spec:
                 default: Fail
                 description: |-
                   conflictPolicy controls what happens when a target object already exists.
-                  Fail (default) leaves a foreign object untouched and records a conflict;
+                  Fail (default) leaves a foreign object untouched and records a conflict,
                   Adopt takes ownership of an un-owned object. Adopt never steals an object
                   already carrying another binding's/consumer's markers.
                 enum:
@@ -103,7 +103,7 @@ spec:
               relatedResources:
                 description: |-
                   relatedResources are Secrets/ConfigMaps synced alongside instances of the
-                  bound APIs. Not yet synced in the alpha POC.
+                  bound APIs.
                 items:
                   description: |-
                     RelatedResource selects auxiliary objects (Secrets/ConfigMaps) to sync
@@ -210,7 +210,7 @@ spec:
                     conflictCount:
                       description: |-
                         conflictCount is the number of objects skipped due to foreign ownership.
-                        Per-object detail lives on each object's own condition, not here.
+                        Per-object details are recorded in consumer-object annotations and Events.
                       format: int32
                       type: integer
                     crdHash:

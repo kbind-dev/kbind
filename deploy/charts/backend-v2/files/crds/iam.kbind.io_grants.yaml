@@ -38,7 +38,7 @@ spec:
         description: |-
           Grant records that an identity was issued credentials for an export. The
           gateway creates it with the export's API list and defaults resolved in
-          (issuance is a stable record even if the catalog entry changes later); the
+          (issuance is a stable record even if the catalog entry changes later), the
           issuer controller provisions the tenancy boundary, ServiceAccount, RBAC and
           token from the spec and reports the artifacts in status. Deleting the Grant
           revokes: the issuer's cleanup finalizer unwinds everything it provisioned.
@@ -72,7 +72,7 @@ spec:
                   description: |-
                     APIRef identifies an exported API by its CRD name on the provider,
                     i.e. "<plural>.<group>" (for example "mangodbs.mangodb.io"). Under the
-                    OpenAPI schema source there is no CRD object behind the name; it is still
+                    OpenAPI schema source there is no CRD object behind the name, it is still
                     just resource + group.
                   properties:
                     name:
