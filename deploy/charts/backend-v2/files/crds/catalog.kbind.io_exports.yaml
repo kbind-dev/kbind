@@ -33,9 +33,9 @@ spec:
           Export is one curated offering in the provider's catalog: human-facing
           metadata plus defaults on top of one or more exported APIs. The catalog is
           derived-from-core-truth: an Export listing an API that is not actually
-          exported (label/boundary) gets a condition and is hidden by the gateway —
+          exported (label/boundary) gets a condition and is hidden by the gateway,
           the export label remains the source of truth, the catalog is presentation
-          and defaults. Lives on the provider; the konnector never sees it.
+          and defaults. Lives on the provider, the konnector never sees it.
         properties:
           apiVersion:
             description: |-
@@ -65,7 +65,7 @@ spec:
                   description: |-
                     APIRef identifies an exported API by its CRD name on the provider,
                     i.e. "<plural>.<group>" (for example "mangodbs.mangodb.io"). Under the
-                    OpenAPI schema source there is no CRD object behind the name; it is still
+                    OpenAPI schema source there is no CRD object behind the name, it is still
                     just resource + group.
                   properties:
                     name:

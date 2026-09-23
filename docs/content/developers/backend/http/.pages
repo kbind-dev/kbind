@@ -1,0 +1,4 @@
+nav:
+  - index.md
+  - cluster-binding.md
+  - api-binding.md

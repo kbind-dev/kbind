@@ -1,0 +1,7 @@
+mike==2.1.3
+mkdocs==1.6.1
+mkdocs-material[imaging]==9.7.1
+mkdocs-awesome-pages-plugin==2.9.2
+mkdocs-macros-plugin==1.0.5
+pymdown-extensions==10.21.3
+click==8.1.8

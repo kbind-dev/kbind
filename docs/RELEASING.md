@@ -7,20 +7,30 @@ branches for future maintenance.
 
 Releases are driven entirely by git tags. Pushing a tag that matches `v*`
 triggers the [Image workflow](../.github/workflows/image.yaml), which builds the
-multi-arch `konnector` image and pushes it to the GitHub Container Registry:
+multi-arch `konnector` and `backend` images and pushes them to the GitHub
+Container Registry:
 
 ```
 ghcr.io/<owner>/konnector:<tag>
+ghcr.io/<owner>/backend:<tag>
 ```
 
-There is no `:latest` or `:<sha>` tag — the image registry is shared with the
-v1/`main` images, so only the exact version tag is published.
+The same workflow publishes `konnector-v2` and `backend-v2` OCI Helm charts
+under `oci://ghcr.io/<owner>/charts`. Their chart version drops the leading
+`v`, while `appVersion` retains it to select the matching image tag.
+
+There is no `:latest` or `:<sha>` tag, the image registry is shared with the
+0.x/`main` images, so only the exact version tag is published.
+
+The [CLI workflow](../.github/workflows/cli.yaml) publishes CLI archives and
+updates krew only for final tags. Prerelease users must build the CLI from
+the intended checkout.
 
 Version tags follow [semantic versioning](https://semver.org):
 
-- `v2.0.0-rc1`, `v2.0.0-rc2`, … — release candidates (pre-releases).
-- `v2.0.0` — the final GA release.
-- `v2.0.1`, `v2.1.0`, … — patch / minor releases.
+- `v2.0.0-rc1`, `v2.0.0-rc2`, …, release candidates (pre-releases).
+- `v2.0.0`, the final GA release.
+- `v2.0.1`, `v2.1.0`, …, patch / minor releases.
 
 ## Cutting a release candidate
 
@@ -67,8 +77,10 @@ on your current `HEAD`, so check out the commit you intend to release first.
    git push origin v2.0.0-rc1
    ```
 
-4. The Image workflow runs automatically. When it finishes, the image is
-   available at `ghcr.io/<owner>/konnector:v2.0.0-rc1`.
+4. The Image workflow runs automatically. When it finishes, images are
+   available at `ghcr.io/<owner>/{konnector,backend}:v2.0.0-rc1`, and OCI
+   charts at `oci://ghcr.io/<owner>/charts/{konnector-v2,backend-v2}`
+   with version `2.0.0-rc1`.
 
 5. (Optional) Create a GitHub Release from the tag and mark it as a
    pre-release:
@@ -139,6 +151,12 @@ gh release create v2.0.1 --generate-notes
 ```
 
 ## Naming conventions
+
+Documentation publication is separate from binary releases. The
+[v2 preview publisher](README.md) deploys
+`v2` without moving `latest` or the site's default redirect, including
+when v2 release-candidate tags exist. Promoting v2 to the default docs
+requires a separate, explicit change.
 
 | Kind             | Example        | Cut from        |
 |------------------|----------------|-----------------|
