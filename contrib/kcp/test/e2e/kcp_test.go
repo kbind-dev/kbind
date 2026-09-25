@@ -41,17 +41,13 @@ import (
 	"github.com/kube-bind/kube-bind/test/e2e/framework"
 )
 
-// TODO: Parallelizm is disabled due to bind-login overlapping server usage
-// We need to refactor config machienery to allow multiple servers to be used in parallel tests
-// https://github.com/kube-bind/kube-bind/issues/361
-
 func TestKCPClusterScope(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 	testKcpIntegration(t, "cc", kubebindv1alpha2.ClusterScope)
 }
 
 func TestKCPNamespacedScope(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 	testKcpIntegration(t, "nc", kubebindv1alpha2.NamespacedScope)
 }
 
