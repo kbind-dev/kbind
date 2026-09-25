@@ -139,7 +139,7 @@ func (r *reconciler) ensureControllers(ctx context.Context, namespace, name stri
 		}
 
 		// Start/update controller for this schema
-		if err := r.ensureControllerForSchema(ctx, export, schema); err != nil {
+		if err := r.ensureControllerForSchema(ctx, export, binding, schema); err != nil {
 			errs = append(errs, err)
 		}
 
@@ -170,7 +170,7 @@ func (r *reconciler) ensureControllers(ctx context.Context, namespace, name stri
 	return utilerrors.NewAggregate(errs)
 }
 
-func (r *reconciler) ensureControllerForSchema(ctx context.Context, export *kubebindv1alpha2.APIServiceExport, schema *kubebindv1alpha2.BoundSchema) error {
+func (r *reconciler) ensureControllerForSchema(ctx context.Context, export *kubebindv1alpha2.APIServiceExport, binding *kubebindv1alpha2.APIServiceBinding, schema *kubebindv1alpha2.BoundSchema) error {
 	logger := klog.FromContext(ctx)
 	key := contextstore.NewKey(export.Namespace, export.Name, schema.Name)
 
@@ -296,6 +296,8 @@ func (r *reconciler) ensureControllerForSchema(ctx context.Context, export *kube
 		consumerInf.ForResource(gvr),
 		providerInf,
 		r.serviceNamespaceInformer,
+		binding.Spec.ProviderID,
+		binding.Spec.IsDefault,
 	)
 	if err != nil {
 		runtime.HandleError(err)
@@ -312,6 +314,8 @@ func (r *reconciler) ensureControllerForSchema(ctx context.Context, export *kube
 		consumerInf.ForResource(gvr),
 		providerInf,
 		r.serviceNamespaceInformer,
+		binding.Spec.ProviderID,
+		binding.Spec.IsDefault,
 	)
 	if err != nil {
 		runtime.HandleError(err)

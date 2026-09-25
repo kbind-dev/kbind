@@ -63,6 +63,8 @@ func NewController(
 	consumerDynamicInformer informers.GenericInformer,
 	providerDynamicInformer multinsinformer.GetterInformer,
 	serviceNamespaceInformer dynamic.Informer[bindlisters.APIServiceNamespaceLister],
+	providerID string,
+	isDefault bool,
 ) (*controller, error) {
 	queue := workqueue.NewTypedRateLimitingQueueWithConfig(workqueue.DefaultTypedControllerRateLimiter[string](), workqueue.TypedRateLimitingQueueConfig[string]{Name: controllerName})
 
@@ -150,12 +152,21 @@ func NewController(
 
 	if _, err := consumerDynamicInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
+			if !shouldProcess(obj, providerID, isDefault) {
+				return
+			}
 			c.enqueueConsumer(logger, obj)
 		},
 		UpdateFunc: func(_, newObj any) {
+			if !shouldProcess(newObj, providerID, isDefault) {
+				return
+			}
 			c.enqueueConsumer(logger, newObj)
 		},
 		DeleteFunc: func(obj any) {
+			if !shouldProcess(obj, providerID, isDefault) {
+				return
+			}
 			c.enqueueConsumer(logger, obj)
 		},
 	}); err != nil {
@@ -206,7 +217,31 @@ func (c *controller) enqueueConsumer(logger klog.Logger, obj any) {
 	}
 
 	logger.V(2).Info("queueing Unstructured", "queued", key, "reason", "consumerObject")
-	c.queue.Add(key)
+}
+
+func shouldProcess(obj any, providerID string, isDefault bool) bool {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		// Try DeletedFinalStateUnknown
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			return false
+		}
+		u, ok = tombstone.Obj.(*unstructured.Unstructured)
+		if !ok {
+			return false
+		}
+	}
+
+	annotations := u.GetAnnotations()
+	if annotations == nil {
+		return isDefault
+	}
+	val, ok := annotations["provider.kube-bind.io/provider-id"]
+	if !ok || val == "" {
+		return isDefault
+	}
+	return val == providerID
 }
 
 func (c *controller) enqueueProvider(logger klog.Logger, obj any) {

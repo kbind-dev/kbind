@@ -513,6 +513,7 @@ func (h *handler) handleBind(w http.ResponseWriter, r *http.Request) {
 		Kubeconfig:        handleResult.Kubeconfig,
 		Requests:          []runtime.RawExtension{{Raw: requestBytes}},
 		ProviderNamespace: handleResult.Namespace,
+		ProviderID:        handleResult.ProviderID,
 		BindingName:       exportRequestName,
 	}
 

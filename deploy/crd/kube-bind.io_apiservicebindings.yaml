@@ -202,6 +202,11 @@ spec:
               spec specifies how an API service from a service provider should be bound in the
               local consumer cluster.
             properties:
+              isDefault:
+                description: |-
+                  isDefault indicates whether this binding should be used as the default routing
+                  destination for Custom Resources that do not specify a provider annotation.
+                type: boolean
               kubeconfigSecretRef:
                 description: kubeconfigSecretName is the secret ref that contains
                   the kubeconfig of the service cluster.
@@ -225,6 +230,10 @@ spec:
                 x-kubernetes-validations:
                 - message: kubeconfigSecretRef is immutable
                   rule: self == oldSelf
+              providerID:
+                description: providerID is a stable and unique identifier for the
+                  provider cluster.
+                type: string
             required:
             - kubeconfigSecretRef
             type: object
