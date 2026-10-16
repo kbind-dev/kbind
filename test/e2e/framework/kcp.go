@@ -98,7 +98,7 @@ func WithGenerateName(s string, formatArgs ...any) ClusterWorkspaceOption {
 	}
 }
 
-func NewWorkspace(t *testing.T, config *rest.Config, options ...ClusterWorkspaceOption) (*rest.Config, string) {
+func NewWorkspace(t testing.TB, config *rest.Config, options ...ClusterWorkspaceOption) (*rest.Config, string) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	t.Cleanup(cancelFunc)
 
@@ -138,7 +138,7 @@ func NewWorkspace(t *testing.T, config *rest.Config, options ...ClusterWorkspace
 	ret := rest.CopyConfig(config)
 	ret.Host += ":" + ws.Name
 
-	wsKubeconfigPath := filepath.Join(WorkDir, ws.Name+".kubeconfig")
+	wsKubeconfigPath := filepath.Join(WorkDir(t), ws.Name+".kubeconfig")
 	err = clientcmd.WriteToFile(RestToKubeconfig(ret, ""), wsKubeconfigPath)
 	require.NoError(t, err)
 

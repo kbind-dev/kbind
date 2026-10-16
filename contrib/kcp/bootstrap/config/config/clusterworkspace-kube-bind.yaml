@@ -6,5 +6,5 @@ metadata:
     bootstrap.kcp.io/create-only: "true"
 spec:
   type:
-    name: organization
+    name: universal
     path: root

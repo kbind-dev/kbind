@@ -28,11 +28,6 @@ import (
 	"github.com/kube-bind/kube-bind/contrib/kcp/bootstrap/config/core/resources"
 )
 
-var (
-	// KubeBindRootClusterName is the workspace to host common APIs.
-	KubeBindRootClusterName = logicalcluster.NewPath("root:kube-bind")
-)
-
 // Bootstrap creates resources in this package by continuously retrying the list.
 // This is blocking, i.e. it only returns (with error) when the context is closed or with nil when
 // the bootstrapping is successfully completed.
@@ -42,10 +37,11 @@ func Bootstrap(
 	apiExtensionClusterClient kcpapiextensionsclientset.ClusterInterface,
 	dynamicClusterClient kcpdynamic.ClusterInterface,
 	batteriesIncluded sets.Set[string],
+	baseWorkspace logicalcluster.Path,
 ) error {
-	computeDiscoveryClient := apiExtensionClusterClient.Cluster(KubeBindRootClusterName).Discovery()
-	computeDynamicClient := dynamicClusterClient.Cluster(KubeBindRootClusterName)
+	discoveryClient := apiExtensionClusterClient.Cluster(baseWorkspace).Discovery()
+	dynamicClient := dynamicClusterClient.Cluster(baseWorkspace)
 
-	crdClient := apiExtensionClusterClient.ApiextensionsV1().Cluster(KubeBindRootClusterName).CustomResourceDefinitions()
-	return resources.Bootstrap(ctx, kcpClientSet, computeDiscoveryClient, computeDynamicClient, crdClient, batteriesIncluded)
+	crdClient := apiExtensionClusterClient.ApiextensionsV1().Cluster(baseWorkspace).CustomResourceDefinitions()
+	return resources.Bootstrap(ctx, kcpClientSet, discoveryClient, dynamicClient, crdClient, batteriesIncluded)
 }

@@ -19,6 +19,7 @@ package options
 import (
 	"fmt"
 
+	"github.com/kcp-dev/sdk/apis/core"
 	"github.com/spf13/pflag"
 	"k8s.io/component-base/logs"
 	logsv1 "k8s.io/component-base/logs/api/v1"
@@ -29,9 +30,13 @@ type Options struct {
 
 	ExtraOptions
 }
+
 type ExtraOptions struct {
 	KCPKubeConfig string
 	KCPContext    string
+
+	RootWorkspace  string
+	KBindWorkspace string
 }
 
 type completedOptions struct {
@@ -50,8 +55,11 @@ func NewOptions() *Options {
 	logs.Verbosity = logsv1.VerbosityLevel(2)
 
 	return &Options{
-		Logs:         logs,
-		ExtraOptions: ExtraOptions{},
+		Logs: logs,
+		ExtraOptions: ExtraOptions{
+			RootWorkspace:  core.RootCluster.Path().String(),
+			KBindWorkspace: "root:kbind",
+		},
 	}
 }
 
@@ -60,6 +68,8 @@ func (options *Options) AddFlags(fs *pflag.FlagSet) {
 
 	fs.StringVar(&options.KCPKubeConfig, "kcp-kubeconfig", options.KCPKubeConfig, "path to a kcp kubeconfig. Required to bootstrap the server.")
 	fs.StringVar(&options.KCPContext, "context", options.KCPContext, "Name of the context in the kcp kubeconfig file to use")
+	fs.StringVar(&options.RootWorkspace, "root-workspace", options.RootWorkspace, "Workspace path to use as the root (must exist already)")
+	fs.StringVar(&options.KBindWorkspace, "kbind-workspace", options.KBindWorkspace, "kbind workspace to use (must exist already)")
 }
 
 func (options *Options) Complete() (*CompletedOptions, error) {

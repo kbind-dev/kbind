@@ -249,7 +249,7 @@ func testHappyCase(
 	providerCoreClient := framework.KubeClient(t, providerConfig).CoreV1()
 	providerBindClient := framework.BindClient(t, providerConfig)
 
-	kubeBindConfig := path.Join(framework.WorkDir, "kube-bind-config.yaml")
+	kubeBindConfig := path.Join(framework.WorkDir(t), "kube-bind-config.yaml")
 
 	// Secrets from the actual examples:
 	// For cowboys: colt-45-permit (referenced), cowboy-gang-affiliation (label selector)

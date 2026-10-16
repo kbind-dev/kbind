@@ -18,24 +18,55 @@ package e2e
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kcp-dev/logicalcluster/v3"
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
+	kcptenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 	kcpclientset "github.com/kcp-dev/sdk/client/clientset/versioned/cluster"
 	kcptestinghelpers "github.com/kcp-dev/sdk/testing/helpers"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 
 	"github.com/kube-bind/kube-bind/contrib/kcp/bootstrap"
 	"github.com/kube-bind/kube-bind/contrib/kcp/bootstrap/options"
+	kubebindv1alpha2 "github.com/kube-bind/kube-bind/sdk/apis/kubebind/v1alpha2"
 	"github.com/kube-bind/kube-bind/test/e2e/framework"
 )
+
+// waitForClusterEngaged blocks until the kcp multicluster provider has engaged
+// the workspace described by cfg. The provider creates a kube-bind.io Cluster
+// named "default" in every workspace it engages, so we poll for that object.
+func waitForClusterEngaged(t testing.TB, cfg *rest.Config) {
+	t.Helper()
+
+	gvr := schema.GroupVersionResource{
+		Group:    kubebindv1alpha2.SchemeGroupVersion.Group,
+		Version:  kubebindv1alpha2.SchemeGroupVersion.Version,
+		Resource: "clusters",
+	}
+
+	client := framework.DynamicClient(t, cfg).Resource(gvr)
+
+	kcptestinghelpers.Eventually(t, func() (bool, string) {
+		_, err := client.Get(t.Context(), kubebindv1alpha2.DefaultClusterName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, "kube-bind.io Cluster \"default\" not created yet"
+			}
+			return false, fmt.Sprintf("error getting kube-bind.io Cluster: %v", err)
+		}
+		return true, ""
+	}, wait.ForeverTestTimeout, time.Millisecond*100)
+}
 
 func wsConfig(t testing.TB, rest *rest.Config, workspace logicalcluster.Path) (*rest.Config, string) {
 	cfg := rest
@@ -126,20 +157,46 @@ func createApiBinding(t testing.TB, client *kcpclientset.ClusterClientset, path 
 	return inCluster
 }
 
-func bootstrapKCP(t testing.TB, rest *rest.Config) {
+// bootstrapKCP bootstraps kcp for a test. It creates a per-test root workspace
+// (root:<test>) with a kbind workspace beneath it (root:<test>:kbind) and installs
+// the kube-bind APIs there. It returns a rest.Config pointing at the per-test root
+// workspace (so consumer/provider workspaces can be created as siblings of kbind)
+// and the path of the kbind workspace.
+func bootstrapKCP(t testing.TB, rest *rest.Config) (*rest.Config, logicalcluster.Path) {
 	t.Helper()
 	t.Log("Bootstrapping kcp")
 
-	cfg := rest
-	cfg.Host += "/clusters/root"
-	adminApiCfg := framework.RestToKubeconfig(cfg, "default")
-	adminKubeconfig := framework.WriteKubeconfig(t, adminApiCfg, "admin.kubeconfig")
+	wsName := strings.ToLower(t.Name())
+	kbindLeafName := "kbind"
+	rootWorkspace := fmt.Sprintf("root:%s", wsName)
+	kbindWorkspace := fmt.Sprintf("%s:%s", rootWorkspace, kbindLeafName)
+
+	// The provided rest.Config should already point to a running kcp server.
+	// It should already have /clusters/root in the path if read from kubeconfig.
+	// Just ensure we have the right base URL for bootstrap.
+	cfg := *rest
+	adminApiCfg := framework.RestToKubeconfig(&cfg, "default")
+
+	// create the two workspaces we want our tests to run in
+	testRootCfg, _ := framework.NewWorkspace(t, rest, func(ws *kcptenancyv1alpha1.Workspace) {
+		ws.Name = wsName
+		ws.GenerateName = ""
+	})
+
+	framework.NewWorkspace(t, testRootCfg, func(ws *kcptenancyv1alpha1.Workspace) {
+		ws.Name = kbindLeafName
+		ws.GenerateName = ""
+	})
+
+	adminKubeconfig := framework.WriteKubeconfigToPath(t, adminApiCfg, filepath.Join(framework.WorkDir(t), "admin.kubeconfig"))
 
 	fs := pflag.NewFlagSet("kcp-bootstrap", pflag.ContinueOnError)
 	options := options.NewOptions()
 	options.AddFlags(fs)
 
 	options.KCPKubeConfig = adminKubeconfig
+	options.RootWorkspace = rootWorkspace
+	options.KBindWorkspace = kbindWorkspace
 
 	completed, err := options.Complete()
 	require.NoError(t, err)
@@ -149,5 +206,9 @@ func bootstrapKCP(t testing.TB, rest *rest.Config) {
 
 	bootstrapper, err := bootstrap.NewServer(t.Context(), config)
 	require.NoError(t, err)
-	require.NoError(t, bootstrapper.Start(t.Context()))
+
+	err = bootstrapper.Start(t.Context())
+	require.NoError(t, err)
+
+	return testRootCfg, logicalcluster.NewPath(kbindWorkspace)
 }

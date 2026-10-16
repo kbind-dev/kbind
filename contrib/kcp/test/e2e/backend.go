@@ -35,7 +35,7 @@ import (
 	"github.com/kube-bind/kube-bind/test/e2e/framework"
 )
 
-func bootstrapBackend(t *testing.T, rest *rest.Config, scope kubebindv1alpha2.InformerScope) string {
+func bootstrapBackend(t *testing.T, rest *rest.Config, scope kubebindv1alpha2.InformerScope, kbindPath logicalcluster.Path) string {
 	t.Helper()
 	t.Log("Bootstrapping backend")
 
@@ -46,7 +46,7 @@ func bootstrapBackend(t *testing.T, rest *rest.Config, scope kubebindv1alpha2.In
 
 	exportUrl := ""
 	kcptestinghelpers.Eventually(t, func() (bool, string) {
-		exportES, err := client.Cluster(logicalcluster.NewPath("root").Join("kube-bind")).
+		exportES, err := client.Cluster(kbindPath).
 			ApisV1alpha1().
 			APIExportEndpointSlices().
 			Get(t.Context(), "kube-bind.io", metav1.GetOptions{})
@@ -61,7 +61,7 @@ func bootstrapBackend(t *testing.T, rest *rest.Config, scope kubebindv1alpha2.In
 	}, wait.ForeverTestTimeout, time.Millisecond*100)
 	require.NotEmpty(t, exportUrl, "APIExportEndpointSlice URL is empty")
 
-	_, backendKubeconfig := wsConfig(t, rest, logicalcluster.NewPath("root").Join("kube-bind"))
+	_, backendKubeconfig := wsConfig(t, rest, kbindPath)
 
 	t.Log("Starting kube-bind backend for kcp")
 	addr, _ := framework.StartBackend(t,

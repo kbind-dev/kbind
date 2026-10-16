@@ -19,6 +19,7 @@ package bootstrap
 import (
 	"context"
 
+	"github.com/kcp-dev/logicalcluster/v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
@@ -49,10 +50,13 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Config.ApiextensionsClient,
 		s.Config.DynamicClusterClient,
 		fakeBatteries,
+		logicalcluster.NewPath(s.Config.Options.ExtraOptions.RootWorkspace),
 	); err != nil {
 		logger.Error(err, "failed to bootstrap initial config workspace")
 		return nil // don't klog.Fatal. This only happens when context is cancelled.
 	}
+
+	kbindWorkspace := logicalcluster.NewPath(s.Config.Options.ExtraOptions.KBindWorkspace)
 
 	if err := bootstrapcore.Bootstrap(
 		ctx,
@@ -60,6 +64,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Config.ApiextensionsClient,
 		s.Config.DynamicClusterClient,
 		fakeBatteries,
+		kbindWorkspace,
 	); err != nil {
 		logger.Error(err, "failed to bootstrap core workspace")
 		return nil // don't klog.Fatal. This only happens when context is cancelled.
@@ -71,6 +76,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Config.ApiextensionsClient,
 		s.Config.DynamicClusterClient,
 		fakeBatteries,
+		kbindWorkspace,
 	); err != nil {
 		logger.Error(err, "failed to bootstrap workspace")
 		return nil // don't klog.Fatal. This only happens when context is cancelled.

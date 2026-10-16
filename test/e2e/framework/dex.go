@@ -56,7 +56,7 @@ func StartDex(t testing.TB) {
 	dexOnce.Do(func() {
 		dexConfig := os.Getenv("DEX_CONFIG")
 		if dexConfig == "" {
-			dexConfig = filepath.Clean(filepath.Join(WorkDir, "..", "hack", "dex-config-dev.yaml"))
+			dexConfig = filepath.Clean(filepath.Join(RepoRoot(), "hack", "dex-config-dev.yaml"))
 		}
 
 		t.Logf("Starting dex with config %q", dexConfig)

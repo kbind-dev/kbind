@@ -20,15 +20,40 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"testing"
 )
 
 var (
-	WorkDir = os.Getenv("WORK_DIR")
+	repoRoot string
 )
 
 func init() {
-	if WorkDir == "" {
-		_, f, _, _ := runtime.Caller(0)
-		WorkDir = filepath.Clean(filepath.Join(f, "..", "..", "..", "..", ".kube-bind"))
+	_, f, _, _ := runtime.Caller(0)
+	repoRoot = filepath.Clean(filepath.Join(f, "..", "..", "..", ".."))
+}
+
+// WorkDir returns a test-specific working directory. Each test gets its own subdirectory
+// based on the test name, allowing parallel tests to avoid file conflicts.
+func WorkDir(t testing.TB) string {
+	workDir := os.Getenv("WORK_DIR")
+	if workDir == "" {
+		workDir = filepath.Join(RepoRoot(), ".kube-bind")
 	}
+
+	return filepath.Join(workDir, sanitizeTestName(t.Name()))
+}
+
+// RepoRoot returns the root directory of the repository
+func RepoRoot() string {
+	return repoRoot
+}
+
+// sanitizeTestName converts a test name to a valid directory name by replacing
+// path separators and other problematic characters.
+func sanitizeTestName(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+
+	return name
 }

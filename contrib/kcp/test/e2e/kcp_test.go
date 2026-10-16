@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kcp-dev/logicalcluster/v3"
 	kcpclientset "github.com/kcp-dev/sdk/client/clientset/versioned/cluster"
 	kcptestinghelpers "github.com/kcp-dev/sdk/testing/helpers"
 	"github.com/stretchr/testify/require"
@@ -41,17 +40,13 @@ import (
 	"github.com/kube-bind/kube-bind/test/e2e/framework"
 )
 
-// TODO: Parallelizm is disabled due to bind-login overlapping server usage
-// We need to refactor config machienery to allow multiple servers to be used in parallel tests
-// https://github.com/kube-bind/kube-bind/issues/361
-
 func TestKCPClusterScope(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 	testKcpIntegration(t, "cc", kubebindv1alpha2.ClusterScope)
 }
 
 func TestKCPNamespacedScope(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 	testKcpIntegration(t, "nc", kubebindv1alpha2.NamespacedScope)
 }
 
@@ -60,26 +55,30 @@ func testKcpIntegration(t *testing.T, name string, scope kubebindv1alpha2.Inform
 	t.Logf("Testing kcp integration with informer scope %s, tempdir: %s", scope, t.TempDir())
 
 	// kcp bootstrap
-	bootstrapKCP(t, framework.ClientConfig(t))
+	testRootCfg, kbindWsPath := bootstrapKCP(t, framework.ClientConfig(t))
+
+	// The per-test root workspace is the parent of the kbind workspace, i.e.
+	// kbindWsPath is root:<test>:kbind, so its parent is root:<test>.
+	testRootPath, _ := kbindWsPath.Parent()
 
 	suffix := framework.RandomString(4)
 
 	// consumer
 	t.Log("Create consumer workspace")
 	consumerWsName := fmt.Sprintf("%s-consumer-%s", name, suffix)
-	consumerCfg, consumerKubeconfigPath := framework.NewWorkspace(t, framework.ClientConfig(t), framework.WithStaticName(consumerWsName))
+	consumerCfg, consumerKubeconfigPath := framework.NewWorkspace(t, testRootCfg, framework.WithStaticName(consumerWsName))
 
 	t.Log("Start konnector for consumer workspace")
 	framework.StartKonnector(t, consumerCfg, "--kubeconfig="+consumerKubeconfigPath)
 
 	// backend
-	backendAddr := bootstrapBackend(t, framework.ClientConfig(t), scope)
+	backendAddr := bootstrapBackend(t, framework.ClientConfig(t), scope, kbindWsPath)
 
 	// provider
 	t.Log("Create provider workspace")
 	providerWsName := fmt.Sprintf("%s-provider-%s", name, suffix)
-	providerWsPath := logicalcluster.NewPath("root").Join(providerWsName)
-	providerCfg, _ := framework.NewWorkspace(t, framework.ClientConfig(t), framework.WithStaticName(providerWsName))
+	providerWsPath := testRootPath.Join(providerWsName)
+	providerCfg, _ := framework.NewWorkspace(t, testRootCfg, framework.WithStaticName(providerWsName))
 
 	cfg := framework.ClientConfig(t)
 	cfg.Host = strings.Split(cfg.Host, "/clusters/")[0]
@@ -90,7 +89,7 @@ func testKcpIntegration(t *testing.T, name string, scope kubebindv1alpha2.Inform
 	createApiBinding(t,
 		kcpClusterClient,
 		providerWsPath,
-		generateApiBinding(t, logicalcluster.NewPath("root").Join("kube-bind"), "kube-bind.io", "kube-bind.io",
+		generateApiBinding(t, kbindWsPath, "kube-bind.io", "kube-bind.io",
 			"clusterrolebindings.rbac.authorization.k8s.io",
 			"clusterroles.rbac.authorization.k8s.io",
 			"customresourcedefinitions.apiextensions.k8s.io",
@@ -106,6 +105,13 @@ func testKcpIntegration(t *testing.T, name string, scope kubebindv1alpha2.Inform
 	)
 
 	t.Log("Applying example APIExport, APIResourceSchemas and templates to provider workspace")
+
+	// Grant the embedded OIDC user permission to bind kube-bind.io resources in
+	// the provider workspace. This is required for the backend's bind
+	// SubjectAccessReview during the login flow.
+	rbacData, err := kcpboostrapdeploy.Examples.ReadFile("examples/rbac-embedded-user.yaml")
+	require.NoError(t, err, "failed to read embedded user RBAC")
+	framework.ApplyManifest(t, providerCfg, rbacData)
 
 	files := []string{"examples/apiexport.yaml",
 		"examples/apiresourceschema-cowboys.yaml",  // namespaced
@@ -155,6 +161,13 @@ func testKcpIntegration(t *testing.T, name string, scope kubebindv1alpha2.Inform
 	providerClusterID := providerClusterSplit[len(providerClusterSplit)-1]
 	require.NotEmpty(t, providerClusterID, "Retrieved cluster id is empty, source URL: %s", providerCluster.Status.URL)
 
+	// Wait for the backend to engage the provider workspace. The kcp provider
+	// creates a kube-bind.io Cluster named "default" in every workspace it
+	// engages, so its presence signals that the backend can serve requests for
+	// this cluster (which the bind SubjectAccessReview during login depends on).
+	t.Log("Wait for backend to engage provider workspace")
+	waitForClusterEngaged(t, providerCfg)
+
 	// kube-bind process
 	t.Log("Perform binding process with browser")
 	var templateRef, kind, resource string
@@ -171,7 +184,7 @@ func testKcpIntegration(t *testing.T, name string, scope kubebindv1alpha2.Inform
 		require.Fail(t, "unhandled scope %q", scope)
 	}
 
-	kubeBindConfig := path.Join(framework.WorkDir, "kube-bind-config-kcp.yaml")
+	kubeBindConfig := path.Join(framework.WorkDir(t), "kube-bind-config-kcp.yaml")
 
 	iostreams, _, _, _ := genericclioptions.NewTestIOStreams()
 	authURLDryRunCh := make(chan string, 1)

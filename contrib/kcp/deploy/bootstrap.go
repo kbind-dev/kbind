@@ -39,11 +39,6 @@ import (
 //go:embed examples/*.yaml
 var Examples embed.FS
 
-var (
-	// KubeBindRootClusterName is the workspace to host common APIs.
-	KubeBindRootClusterName = logicalcluster.NewPath("root:kube-bind")
-)
-
 // Bootstrap creates resources in this package by continuously retrying the list.
 // This is blocking, i.e. it only returns (with error) when the context is closed or with nil when
 // the bootstrapping is successfully completed.
@@ -53,21 +48,22 @@ func Bootstrap(
 	apiExtensionClusterClient kcpapiextensionsclientset.ClusterInterface,
 	dynamicClusterClient kcpdynamic.ClusterInterface,
 	batteriesIncluded sets.Set[string],
+	baseWorkspace logicalcluster.Path,
 ) error {
-	computeDiscoveryClient := apiExtensionClusterClient.Cluster(KubeBindRootClusterName).Discovery()
-	computeDynamicClient := dynamicClusterClient.Cluster(KubeBindRootClusterName)
+	discoveryClient := apiExtensionClusterClient.Cluster(baseWorkspace).Discovery()
+	dynamicClient := dynamicClusterClient.Cluster(baseWorkspace)
 
-	crdClient := apiExtensionClusterClient.ApiextensionsV1().Cluster(KubeBindRootClusterName).CustomResourceDefinitions()
-	kcpClient := kcpClientSet.Cluster(KubeBindRootClusterName)
+	crdClient := apiExtensionClusterClient.ApiextensionsV1().Cluster(baseWorkspace).CustomResourceDefinitions()
+	kcpClient := kcpClientSet.Cluster(baseWorkspace)
 
-	err := resources.Bootstrap(ctx, kcpClientSet, computeDiscoveryClient, computeDynamicClient, crdClient, batteriesIncluded)
+	err := resources.Bootstrap(ctx, kcpClientSet, discoveryClient, dynamicClient, crdClient, batteriesIncluded)
 	if err != nil {
 		return err
 	}
 
 	// create recursive apibinding so we can start controllers.
 	// this is a temporary solution until we have a better way to bootstrap controllers.
-	return bindAPIExport(ctx, kcpClient, "kube-bind.io", KubeBindRootClusterName)
+	return bindAPIExport(ctx, kcpClient, "kube-bind.io", baseWorkspace)
 }
 
 func bindAPIExport(ctx context.Context, kcpClient kcpclient.Interface, exportName string, clusterPath logicalcluster.Path) error {

@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kcp-dev/logicalcluster/v3"
 	kcpclientset "github.com/kcp-dev/sdk/client/clientset/versioned/cluster"
 	kcptestinghelpers "github.com/kcp-dev/sdk/testing/helpers"
 	"github.com/stretchr/testify/require"
@@ -41,11 +40,13 @@ import (
 
 // TestKCP3TierClusterScope tests the 3-tier kcp flow with cluster-scoped resources.
 func TestKCP3TierClusterScope(t *testing.T) {
+	t.Parallel()
 	testKcp3TierIntegration(t, "3cc", kubebindv1alpha2.ClusterScope)
 }
 
 // TestKCP3TierNamespacedScope tests the 3-tier kcp flow with namespaced resources.
 func TestKCP3TierNamespacedScope(t *testing.T) {
+	t.Parallel()
 	testKcp3TierIntegration(t, "3nc", kubebindv1alpha2.NamespacedScope)
 }
 
@@ -68,7 +69,8 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 
 	// kcp bootstrap (creates :root:kube-bind workspace with APIExport etc.)
 	// Note: no StartDex needed — the backend uses embedded OIDC (mockoidc) which auto-approves.
-	bootstrapKCP(t, framework.ClientConfig(t))
+	testRootCfg, kbindWsPath := bootstrapKCP(t, framework.ClientConfig(t))
+	testRootPath, _ := kbindWsPath.Parent()
 
 	suffix := framework.RandomString(4)
 
@@ -80,8 +82,8 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 	// --- Provider workspace ---
 	t.Log("Create provider workspace")
 	providerWsName := fmt.Sprintf("%s-provider-%s", name, suffix)
-	providerWsPath := logicalcluster.NewPath("root").Join(providerWsName)
-	providerCfg, _ := framework.NewWorkspace(t, framework.ClientConfig(t), framework.WithStaticName(providerWsName))
+	providerWsPath := testRootPath.Join(providerWsName)
+	providerCfg, _ := framework.NewWorkspace(t, testRootCfg, framework.WithStaticName(providerWsName))
 
 	t.Log("Applying APIResourceSchema and APIExport to provider workspace")
 	// Apply the cowboys APIResourceSchema and a cowboys-only APIExport.
@@ -102,13 +104,13 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 	// --- Consumer workspace ---
 	t.Log("Create consumer workspace")
 	consumerWsName := fmt.Sprintf("%s-consumer-%s", name, suffix)
-	consumerCfg, consumerKubeconfigPath := framework.NewWorkspace(t, framework.ClientConfig(t), framework.WithStaticName(consumerWsName))
+	consumerCfg, consumerKubeconfigPath := framework.NewWorkspace(t, testRootCfg, framework.WithStaticName(consumerWsName))
 
 	t.Log("Start konnector for consumer workspace")
 	framework.StartKonnector(t, consumerCfg, "--kubeconfig="+consumerKubeconfigPath)
 
 	// --- Backend (kube-bind process + backend workspace) ---
-	backendAddr := bootstrapBackend(t, framework.ClientConfig(t), scope)
+	backendAddr := bootstrapBackend(t, framework.ClientConfig(t), scope, kbindWsPath)
 
 	// --- Backend workspace ---
 	// The backend workspace binds both kube-bind.io and the provider's cowboys APIExport.
@@ -117,14 +119,21 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 	// 2. Copy APIResourceSchemas with kube-bind.io/exported=true label
 	t.Log("Create backend workspace")
 	backendWsName := fmt.Sprintf("%s-backend-%s", name, suffix)
-	backendWsPath := logicalcluster.NewPath("root").Join(backendWsName)
-	backendCfg, _ := framework.NewWorkspace(t, framework.ClientConfig(t), framework.WithStaticName(backendWsName))
+	backendWsPath := testRootPath.Join(backendWsName)
+	backendCfg, _ := framework.NewWorkspace(t, testRootCfg, framework.WithStaticName(backendWsName))
+
+	// Grant the embedded OIDC user permission to bind kube-bind.io resources in
+	// the backend workspace. This is required for the backend's bind
+	// SubjectAccessReview during the login flow.
+	rbacData, err := kcpboostrapdeploy.Examples.ReadFile("examples/rbac-embedded-user.yaml")
+	require.NoError(t, err, "failed to read embedded user RBAC")
+	framework.ApplyManifest(t, backendCfg, rbacData)
 
 	t.Log("Bind kube-bind.io APIExport to backend workspace")
 	createApiBinding(t,
 		kcpClusterClient,
 		backendWsPath,
-		generateApiBinding(t, logicalcluster.NewPath("root").Join("kube-bind"), "kube-bind.io", "kube-bind.io",
+		generateApiBinding(t, kbindWsPath, "kube-bind.io", "kube-bind.io",
 			"clusterrolebindings.rbac.authorization.k8s.io",
 			"clusterroles.rbac.authorization.k8s.io",
 			"customresourcedefinitions.apiextensions.k8s.io",
@@ -189,6 +198,11 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 	backendClusterID := backendClusterSplit[len(backendClusterSplit)-1]
 	require.NotEmpty(t, backendClusterID, "Retrieved cluster id is empty")
 
+	// Wait for the backend to engage the backend workspace before logging in,
+	// as the bind SubjectAccessReview during login depends on it.
+	t.Log("Wait for backend to engage backend workspace")
+	waitForClusterEngaged(t, backendCfg)
+
 	// --- Binding ---
 	var templateRef, kind, resource string
 	switch scope {
@@ -204,7 +218,7 @@ func testKcp3TierIntegration(t *testing.T, name string, scope kubebindv1alpha2.I
 		require.Fail(t, "unhandled scope %q", scope)
 	}
 
-	kubeBindConfig := path.Join(framework.WorkDir, "kube-bind-config-kcp-3tier.yaml")
+	kubeBindConfig := path.Join(framework.WorkDir(t), "kube-bind-config-kcp-3tier.yaml")
 
 	iostreams, _, _, _ := genericclioptions.NewTestIOStreams()
 	authURLDryRunCh := make(chan string, 1)

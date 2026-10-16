@@ -53,7 +53,7 @@ func NewConfig(options *options.CompletedOptions) (*Config, error) {
 		return nil, err
 	}
 	config.ClientConfig = rest.CopyConfig(config.ClientConfig)
-	config.ClientConfig = rest.AddUserAgent(config.ClientConfig, "kube-bind-kcp-init")
+	config.ClientConfig = rest.AddUserAgent(config.ClientConfig, "kbind-kcp-init")
 
 	config.ClientConfig, err = newKCPRestConfig(config.ClientConfig)
 	if err != nil {
