@@ -41,7 +41,19 @@ func NewServer(options *options.Serve) (*Server, error) {
 		listener: options.Listener,
 	}
 
+	// Health endpoints are registered here, rather than with the API routes,
+	// so they are served even when the frontend is disabled. /healthz is used
+	// by the Kubernetes probes, /api/healthz is kept for API clients.
+	server.Router.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
+	server.Router.HandleFunc("/api/healthz", handleHealthz).Methods(http.MethodGet)
+
 	return server, nil
+}
+
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	prepareNoCache(w)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok")) //nolint:errcheck
 }
 
 func (s *Server) Addr() net.Addr {

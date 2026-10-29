@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
-	nethttp "net/http"
 	"strings"
 	"sync"
 
@@ -117,12 +116,6 @@ func NewServer(ctx context.Context, c *Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error setting up HTTP Server: %w", err)
 	}
-
-	// Register health check endpoint
-	s.WebServer.Router.HandleFunc("/healthz", func(w nethttp.ResponseWriter, r *nethttp.Request) {
-		w.WriteHeader(nethttp.StatusOK)
-		w.Write([]byte("ok")) //nolint:errcheck
-	}).Methods("GET")
 
 	if c.Options.FrontendDisabled {
 		logger.Info("Frontend is disabled; running in backend only mode")

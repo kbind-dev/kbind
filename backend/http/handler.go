@@ -152,7 +152,6 @@ func NewHandler(
 
 func (h *handler) AddRoutes(mux *mux.Router) error {
 	// Public API routes (no authentication required)
-	mux.HandleFunc("/api/healthz", h.handleHealthz).Methods(http.MethodGet)
 	mux.HandleFunc("/api/bindable-resources", h.handleBindableResources).Methods(http.MethodGet)
 	// Intentionally unauthenticated: serves static, deterministic deployment YAML
 	// (konnector image tag is the only variable, derived from the server's own version).
@@ -195,11 +194,6 @@ func (h *handler) AddRoutes(mux *mux.Router) error {
 		mux.PathPrefix("/").Handler(spaserver.NewSPAFileServer(fs))
 	}
 	return nil
-}
-
-func (h *handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	prepareNoCache(w)
-	w.WriteHeader(http.StatusOK)
 }
 
 func (h *handler) handlePing(w http.ResponseWriter, r *http.Request) {
