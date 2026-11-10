@@ -68,6 +68,11 @@ func (b *BindAPIServiceOptions) createAPIServiceBindings(ctx context.Context, co
 			}
 		}
 
+		// Ensure dynamic RBAC is created for the konnector to access the bound resources
+		if err := ensureKonnectorDynamicRBAC(ctx, config, existing, request); err != nil {
+			return nil, fmt.Errorf("failed to create dynamic RBAC for konnector: %w", err)
+		}
+
 		return []*kubebindv1alpha2.APIServiceBinding{existing}, nil
 	}
 
@@ -104,6 +109,11 @@ func (b *BindAPIServiceOptions) createAPIServiceBindings(ctx context.Context, co
 		return true, nil
 	}); err != nil {
 		return nil, err
+	}
+
+	// Ensure dynamic RBAC is created for the konnector to access the bound resources
+	if err := ensureKonnectorDynamicRBAC(ctx, config, created, request); err != nil {
+		return nil, fmt.Errorf("failed to create dynamic RBAC for konnector: %w", err)
 	}
 
 	fmt.Fprintf(b.Options.IOStreams.ErrOut, "✅ Created APIServiceBinding %s for %d resources\n", bindingName, len(request.Spec.Resources))

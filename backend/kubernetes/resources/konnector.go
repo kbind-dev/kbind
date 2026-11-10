@@ -60,19 +60,33 @@ func NewKonnectorManifests(konnectorImage string, hostAliases []corev1.HostAlias
 				Namespace: KonnectorNamespace,
 			},
 		},
-		// Broad access is required because the konnector dynamically manages CRDs
-		// and syncs arbitrary resource types discovered from the provider. Scoping
-		// down would require knowing the bound resource types in advance, which
-		// defeats the auto-discovery model.
+		// The konnector dynamically manages CRDs and syncs arbitrary resource types.
+		// Wildcard permissions are no longer used here; instead, the kubectl bind
+		// CLI dynamically creates RBAC for the bound custom resources.
 		ClusterRole: &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: KonnectorClusterRoleName,
 			},
 			Rules: []rbacv1.PolicyRule{
 				{
-					APIGroups: []string{"*"},
-					Resources: []string{"*"},
-					Verbs:     []string{"*"},
+					APIGroups: []string{""},
+					Resources: []string{"namespaces", "secrets", "events", "serviceaccounts", "configmaps"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+				{
+					APIGroups: []string{"kube-bind.io"},
+					Resources: []string{"apiservicebindings", "apiservicebindings/status", "clusterbindings", "clusterbindings/status", "servicebindings", "servicebindings/status", "serviceexports", "serviceexports/status"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+				{
+					APIGroups: []string{"apiextensions.k8s.io"},
+					Resources: []string{"customresourcedefinitions"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+				{
+					APIGroups: []string{"coordination.k8s.io"},
+					Resources: []string{"leases"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
 				},
 			},
 		},
