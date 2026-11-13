@@ -8,7 +8,10 @@ description: >
 ## Prerequisites
 
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
-- [kubectl bind plugin](kubectl-plugin.md) installed
+- For the backend walkthrough: [kubectl bind plugin](kubectl-plugin.md) installed
+
+To try synchronization without a backend or login, follow the
+[core-only GitOps example](../usage/gitops.md#try-the-core-without-a-backend).
 
 ## Start with kbind
 
@@ -30,7 +33,7 @@ After the development environment is ready, you can:
 
     ```bash
     kubectl bind catalog
-    kubectl bind export widgets --kubeconfig=.kbind-quickstart/consumer.kubeconfig \
+    kubectl bind export widgets --kubeconfig=consumer.kubeconfig \
       --install-konnector=false
     ```
 
@@ -39,7 +42,7 @@ After the development environment is ready, you can:
 3. **Verify bound resources:**
 
     ```bash
-    export KUBECONFIG="$PWD/.kbind-quickstart/consumer.kubeconfig"
+    export KUBECONFIG="$PWD/consumer.kubeconfig"
     kubectl get connections,clusterbindings
     kubectl wait --for=condition=Established crd/widgets.example.org --timeout=120s
     ```
@@ -61,9 +64,22 @@ After the development environment is ready, you can:
 5. **Check the resource synced to the provider:**
 
     ```bash
-    kubectl --kubeconfig=.kbind-quickstart/provider.kubeconfig -n default \
+    kubectl --kubeconfig=provider.kubeconfig -n default \
       wait --for=create widget/my-widget --timeout=120s
-    kubectl --kubeconfig=.kbind-quickstart/provider.kubeconfig -n default get widgets
+    kubectl --kubeconfig=provider.kubeconfig -n default get widgets
+    ```
+
+6. **Verify status returns to the consumer:**
+
+    The sample has no Widget service controller. Simulate its status update on the
+    provider, then wait for the consumer to receive it:
+
+    ```bash
+    kubectl --kubeconfig=provider.kubeconfig -n default \
+      patch widget my-widget --subresource=status --type=merge \
+      -p '{"status":{"phase":"Running"}}'
+    kubectl --kubeconfig=consumer.kubeconfig -n default \
+      wait --for=jsonpath='{.status.phase}'=Running widget/my-widget --timeout=120s
     ```
 
 For other service APIs, see the [integration examples](../usage/integrations/index.md). When finished, follow the development guide's [cleanup](../developers/dev-environment/kind.md#cleanup).
