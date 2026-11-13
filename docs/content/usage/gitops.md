@@ -2,6 +2,97 @@
 
 The v2 core accepts ordinary Kubernetes YAML. You can manage a Connection and its explicit bindings with your existing GitOps controller, no browser onboarding or continuously running CLI is required.
 
+## Try the core without a backend
+
+This local example uses the existing demo samples to supply credentials, a Connection,
+and a ClusterBinding directly. It needs no backend, catalog, login, or `kubectl bind`
+plugin. Use a v2 source checkout, Go matching `go.mod`, Docker, kind, and kubectl.
+Run commands from the repository root.
+
+The demo creates or reuses kind clusters named `kbind-provider` and `kbind-consumer`.
+Use fresh, disposable clusters with those names: the script applies sample resources
+and replaces its credential Secret. It writes administrator kubeconfigs under `/tmp`
+and copies the provider kubeconfig into a consumer Secret. These credentials are for
+this local demo only; use restricted provider credentials and secure Secret delivery
+for a real deployment.
+
+### Prepare the two clusters
+
+```sh
+make konnector
+make demo
+```
+
+The script installs the exported Widget CRD and related Secret/ConfigMap on the provider.
+On the consumer it installs API definitions, creates the credential Secret, and applies
+`config/samples/binding.yaml`. That file connects `demo-provider` to the Secret and
+selects `widgets.example.org` through ClusterBinding `widgets`.
+
+In a second terminal at the repository root, start the konnector and leave it running:
+
+```sh
+KUBECONFIG=/tmp/kbind-consumer.kubeconfig ./bin/konnector
+```
+
+These kubeconfigs use host-mapped endpoints, so this example runs the konnector on your
+workstation. They are not suitable for a konnector Pod in another cluster.
+
+### Verify synchronization
+
+In the first terminal, wait for readiness before creating a Widget:
+
+```sh
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig wait \
+  --for=condition=Ready connection/demo-provider clusterbinding/widgets --timeout=120s
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig wait \
+  --for=condition=Established crd/widgets.example.org --timeout=120s
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig apply -f config/samples/widget.yaml
+kubectl --kubeconfig /tmp/kbind-provider.kubeconfig -n default wait \
+  --for=create widget/my-widget --timeout=120s
+kubectl --kubeconfig /tmp/kbind-provider.kubeconfig -n default wait \
+  --for=jsonpath='{.spec.size}'=large widget/my-widget --timeout=120s
+```
+
+There is no Widget service controller in this demo. Simulate its status update on the
+provider and verify that it reaches the consumer:
+
+```sh
+kubectl --kubeconfig /tmp/kbind-provider.kubeconfig -n default patch widget my-widget \
+  --subresource=status --type=merge -p '{"status":{"phase":"Running"}}'
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig -n default wait \
+  --for=jsonpath='{.status.phase}'=Running widget/my-widget --timeout=120s
+```
+
+The binding also copies the provider's related Secret and ConfigMap. Check their
+ownership markers without printing Secret data:
+
+```sh
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig -n default wait \
+  --for=create secret/widgets-connection configmap/widgets-tuning --timeout=120s
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig -n default get \
+  secret/widgets-connection configmap/widgets-tuning \
+  -o 'custom-columns=NAME:.metadata.name,BINDING:.metadata.annotations.core\.kbind\.io/related-binding'
+kubectl --kubeconfig /tmp/kbind-consumer.kubeconfig get clusterbinding widgets \
+  -o jsonpath='{.metadata.uid}{"\n"}'
+```
+
+Both `BINDING` values should match the ClusterBinding UID. The consumer sample creates
+only the Widget; the konnector creates these related copies.
+
+### Clean up
+
+Stop the host konnector with Ctrl-C, then remove only the disposable demo clusters and
+their credential files:
+
+```sh
+kind delete cluster --name kbind-consumer
+kind delete cluster --name kbind-provider
+rm /tmp/kbind-consumer.kubeconfig /tmp/kbind-provider.kubeconfig
+```
+
+For an existing deployment, follow [Pruning is unbinding](#pruning-is-unbinding) instead
+of deleting clusters. To manage the same core inputs declaratively, continue below.
+
 ## Separate definitions, credentials, and generated state
 
 Manage these layers deliberately:
