@@ -2671,8 +2671,10 @@
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
 <li><a href="https://kubernetes.io/docs/tasks/tools/#kubectl">kubectl</a></li>
-<li><a href="../kubectl-plugin/">kubectl bind plugin</a> installed</li>
+<li>For the backend walkthrough: <a href="../kubectl-plugin/">kubectl bind plugin</a> installed</li>
 </ul>
+<p>To try synchronization without a backend or login, follow the
+<a href="../../usage/gitops/#try-the-core-without-a-backend">core-only GitOps example</a>.</p>
 <h2 id="start-with-kbind">Start with kbind</h2>
 <h3 id="quick-development-setup">Quick Development Setup</h3>
 <p>For a local development environment, follow the <a href="../../developers/dev-environment/kind/">kind setup guide</a>. It creates a provider cluster and a consumer cluster, starts the backend and konnector, and adds the Widget API to the catalog. Docker, kind, and Go are required.</p>
@@ -2687,14 +2689,14 @@
 <li>
 <p><strong>Bind an API service from provider to consumer:</strong></p>
 <div class="language-bash highlight"><pre><span></span><code><span id="True-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span>catalog
-</span><span id="True-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>widgets<span class="w"> </span>--kubeconfig<span class="o">=</span>.kbind-quickstart/consumer.kubeconfig<span class="w"> </span><span class="se">\</span>
+</span><span id="True-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>widgets<span class="w"> </span>--kubeconfig<span class="o">=</span>consumer.kubeconfig<span class="w"> </span><span class="se">\</span>
 </span><span id="True-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--install-konnector<span class="o">=</span><span class="nb">false</span>
 </span></code></pre></div>
 <p>The development setup already runs the konnector, so skip installing another copy. You can also browse the catalog at <code>http://localhost:8080</code>.</p>
 </li>
 <li>
 <p><strong>Verify bound resources:</strong></p>
-<div class="language-bash highlight"><pre><span></span><code><span id="True-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUBECONFIG</span><span class="o">=</span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/.kbind-quickstart/consumer.kubeconfig"</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="True-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">KUBECONFIG</span><span class="o">=</span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/consumer.kubeconfig"</span>
 </span><span id="True-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>connections,clusterbindings
 </span><span id="True-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kubectl<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Established<span class="w"> </span>crd/widgets.example.org<span class="w"> </span>--timeout<span class="o">=</span>120s
 </span></code></pre></div>
@@ -2714,9 +2716,20 @@
 </li>
 <li>
 <p><strong>Check the resource synced to the provider:</strong></p>
-<div class="language-bash highlight"><pre><span></span><code><span id="True-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>.kbind-quickstart/provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="True-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
 </span><span id="True-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span>create<span class="w"> </span>widget/my-widget<span class="w"> </span>--timeout<span class="o">=</span>120s
-</span><span id="True-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>.kbind-quickstart/provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span>get<span class="w"> </span>widgets
+</span><span id="True-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span>get<span class="w"> </span>widgets
+</span></code></pre></div>
+</li>
+<li>
+<p><strong>Verify status returns to the consumer:</strong></p>
+<p>The sample has no Widget service controller. Simulate its status update on the
+provider, then wait for the consumer to receive it:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="True-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+</span><span id="True-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>patch<span class="w"> </span>widget<span class="w"> </span>my-widget<span class="w"> </span>--subresource<span class="o">=</span>status<span class="w"> </span>--type<span class="o">=</span>merge<span class="w"> </span><span class="se">\</span>
+</span><span id="True-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">'{"status":{"phase":"Running"}}'</span>
+</span><span id="True-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>kubectl<span class="w"> </span>--kubeconfig<span class="o">=</span>consumer.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="se">\</span>
+</span><span id="True-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.phase}'</span><span class="o">=</span>Running<span class="w"> </span>widget/my-widget<span class="w"> </span>--timeout<span class="o">=</span>120s
 </span></code></pre></div>
 </li>
 </ol>
@@ -2725,7 +2738,7 @@
 <p>For an in-cluster deployment, use the <a href="../helm/">Helm charts</a> to install the consumer konnector and optional provider backend.</p>
 <p>Once you have a backend running, either locally or in a cluster, you can connect to it:</p>
 <h3 id="connect-to-kbind-server">Connect to kbind Server</h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="True-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span>login<span class="w"> </span>https://my-kube-bind-server.example.com
+<div class="language-bash highlight"><pre><span></span><code><span id="True-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span>login<span class="w"> </span>https://my-kube-bind-server.example.com
 </span></code></pre></div>
 <h3 id="open-kbind-web-ui-and-bind-services">Open kbind Web UI and bind services</h3>
 <p>Open your provider's URL in a browser to browse the catalog and bind services. For the same workflow from the CLI, use <code>kubectl bind catalog</code> and <code>kubectl bind export &lt;name&gt;</code>.</p>

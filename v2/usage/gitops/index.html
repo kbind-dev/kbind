@@ -1001,6 +1001,56 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#try-the-core-without-a-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try the core without a backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Try the core without a backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prepare-the-two-clusters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prepare the two clusters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verify-synchronization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verify synchronization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clean-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clean up
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#separate-definitions-credentials-and-generated-state" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2699,6 +2749,70 @@
 
 <h1 id="gitops">GitOps</h1>
 <p>The v2 core accepts ordinary Kubernetes YAML. You can manage a Connection and its explicit bindings with your existing GitOps controller, no browser onboarding or continuously running CLI is required.</p>
+<h2 id="try-the-core-without-a-backend">Try the core without a backend</h2>
+<p>This local example uses the existing demo samples to supply credentials, a Connection,
+and a ClusterBinding directly. It needs no backend, catalog, login, or <code>kubectl bind</code>
+plugin. Use a v2 source checkout, Go matching <code>go.mod</code>, Docker, kind, and kubectl.
+Run commands from the repository root.</p>
+<p>The demo creates or reuses kind clusters named <code>kbind-provider</code> and <code>kbind-consumer</code>.
+Use fresh, disposable clusters with those names: the script applies sample resources
+and replaces its credential Secret. It writes administrator kubeconfigs under <code>/tmp</code>
+and copies the provider kubeconfig into a consumer Secret. These credentials are for
+this local demo only; use restricted provider credentials and secure Secret delivery
+for a real deployment.</p>
+<h3 id="prepare-the-two-clusters">Prepare the two clusters</h3>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>make<span class="w"> </span>konnector
+</span><span id="True-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>make<span class="w"> </span>demo
+</span></code></pre></div>
+<p>The script installs the exported Widget CRD and related Secret/ConfigMap on the provider.
+On the consumer it installs API definitions, creates the credential Secret, and applies
+<code>config/samples/binding.yaml</code>. That file connects <code>demo-provider</code> to the Secret and
+selects <code>widgets.example.org</code> through ClusterBinding <code>widgets</code>.</p>
+<p>In a second terminal at the repository root, start the konnector and leave it running:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">KUBECONFIG</span><span class="o">=</span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>./bin/konnector
+</span></code></pre></div>
+<p>These kubeconfigs use host-mapped endpoints, so this example runs the konnector on your
+workstation. They are not suitable for a konnector Pod in another cluster.</p>
+<h3 id="verify-synchronization">Verify synchronization</h3>
+<p>In the first terminal, wait for readiness before creating a Widget:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready<span class="w"> </span>connection/demo-provider<span class="w"> </span>clusterbinding/widgets<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span><span id="True-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Established<span class="w"> </span>crd/widgets.example.org<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span><span id="True-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>config/samples/widget.yaml
+</span><span id="True-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>--for<span class="o">=</span>create<span class="w"> </span>widget/my-widget<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span><span id="True-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>--for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.spec.size}'</span><span class="o">=</span>large<span class="w"> </span>widget/my-widget<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span></code></pre></div>
+<p>There is no Widget service controller in this demo. Simulate its status update on the
+provider and verify that it reaches the consumer:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-provider.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span>patch<span class="w"> </span>widget<span class="w"> </span>my-widget<span class="w"> </span><span class="se">\</span>
+</span><span id="True-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--subresource<span class="o">=</span>status<span class="w"> </span>--type<span class="o">=</span>merge<span class="w"> </span>-p<span class="w"> </span><span class="s1">'{"status":{"phase":"Running"}}'</span>
+</span><span id="True-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.status.phase}'</span><span class="o">=</span>Running<span class="w"> </span>widget/my-widget<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span></code></pre></div>
+<p>The binding also copies the provider's related Secret and ConfigMap. Check their
+ownership markers without printing Secret data:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span><span class="nb">wait</span><span class="w"> </span><span class="se">\</span>
+</span><span id="True-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--for<span class="o">=</span>create<span class="w"> </span>secret/widgets-connection<span class="w"> </span>configmap/widgets-tuning<span class="w"> </span>--timeout<span class="o">=</span>120s
+</span><span id="True-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>-n<span class="w"> </span>default<span class="w"> </span>get<span class="w"> </span><span class="se">\</span>
+</span><span id="True-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>secret/widgets-connection<span class="w"> </span>configmap/widgets-tuning<span class="w"> </span><span class="se">\</span>
+</span><span id="True-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span>-o<span class="w"> </span><span class="s1">'custom-columns=NAME:.metadata.name,BINDING:.metadata.annotations.core\.kbind\.io/related-binding'</span>
+</span><span id="True-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>kubectl<span class="w"> </span>--kubeconfig<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>get<span class="w"> </span>clusterbinding<span class="w"> </span>widgets<span class="w"> </span><span class="se">\</span>
+</span><span id="True-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">'{.metadata.uid}{"\n"}'</span>
+</span></code></pre></div>
+<p>Both <code>BINDING</code> values should match the ClusterBinding UID. The consumer sample creates
+only the Widget; the konnector creates these related copies.</p>
+<h3 id="clean-up">Clean up</h3>
+<p>Stop the host konnector with Ctrl-C, then remove only the disposable demo clusters and
+their credential files:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="True-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kind<span class="w"> </span>delete<span class="w"> </span>cluster<span class="w"> </span>--name<span class="w"> </span>kbind-consumer
+</span><span id="True-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>kind<span class="w"> </span>delete<span class="w"> </span>cluster<span class="w"> </span>--name<span class="w"> </span>kbind-provider
+</span><span id="True-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>rm<span class="w"> </span>/tmp/kbind-consumer.kubeconfig<span class="w"> </span>/tmp/kbind-provider.kubeconfig
+</span></code></pre></div>
+<p>For an existing deployment, follow <a href="#pruning-is-unbinding">Pruning is unbinding</a> instead
+of deleting clusters. To manage the same core inputs declaratively, continue below.</p>
 <h2 id="separate-definitions-credentials-and-generated-state">Separate definitions, credentials, and generated state</h2>
 <p>Manage these layers deliberately:</p>
 <ol>
@@ -2718,39 +2832,39 @@
 <p>Use an existing encrypted-Secret or external-secret workflow for credentials. The resulting Kubernetes Secret must have the namespace, name, and data key referenced by the Connection.</p>
 <h2 id="obtain-a-bundle-from-a-provider">Obtain a bundle from a provider</h2>
 <p>With the <a href="../../setup/kubectl-plugin/">CLI</a> installed and logged in:</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="True-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>widgets<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>widgets-bundle.yaml
+<div class="language-sh highlight"><pre><span></span><code><span id="True-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>kubectl<span class="w"> </span><span class="nb">bind</span><span class="w"> </span><span class="nb">export</span><span class="w"> </span>widgets<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span>&gt;<span class="w"> </span>widgets-bundle.yaml
 </span></code></pre></div>
 <p>This provisions a real Grant and redeems a one-time pickup URL, it is not a dry run. YAML is the only supported output format. This mode does not read the consumer kubeconfig, install the konnector, create namespaces, or apply resources, even when <code>--install-konnector</code> is true.</p>
 <p>Install the core CRDs, konnector, and <code>kbind</code> namespace separately. The bundle contains a long-lived provider token in plaintext YAML. Encrypt its Secret or use a secret manager before committing anything.</p>
 <p>Pickup expiry does not expire a saved bundle's credentials. The provider's optional reaper can revoke Grants that have not yet heartbeated, so coordinate its TTL with rollout timing. See <a href="../catalog/#three-different-lifetimes">bundle lifetimes</a>.</p>
 <h2 id="an-explicit-application-binding">An explicit application binding</h2>
 <p>After creating <code>team-a</code> and delivering <code>kbind/provider-kubeconfig</code>:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="True-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">core.kbind.io/v1alpha1</span>
-</span><span id="True-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
-</span><span id="True-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
-</span><span id="True-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
-</span><span id="True-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
-</span><span id="True-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">kubeconfigSecretRef</span><span class="p">:</span>
-</span><span id="True-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kbind</span>
-</span><span id="True-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-kubeconfig</span>
-</span><span id="True-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubeconfig</span>
-</span><span id="True-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">  </span><span class="nt">schema</span><span class="p">:</span>
-</span><span id="True-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CRD</span>
-</span><span id="True-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">pullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Bound</span>
-</span><span id="True-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="nt">updatePolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Always</span>
-</span><span id="True-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">autoBind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
-</span><span id="True-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="nn">---</span>
-</span><span id="True-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">core.kbind.io/v1alpha1</span>
-</span><span id="True-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Binding</span>
-</span><span id="True-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="nt">metadata</span><span class="p">:</span>
-</span><span id="True-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">widgets</span>
-</span><span id="True-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-a</span>
-</span><span id="True-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="nt">spec</span><span class="p">:</span>
-</span><span id="True-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">  </span><span class="nt">connectionRef</span><span class="p">:</span>
-</span><span id="True-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
-</span><span id="True-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">  </span><span class="nt">apis</span><span class="p">:</span>
-</span><span id="True-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">widgets.example.org</span>
-</span><span id="True-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">  </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Fail</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="True-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">core.kbind.io/v1alpha1</span>
+</span><span id="True-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Connection</span>
+</span><span id="True-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="True-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
+</span><span id="True-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="True-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">kubeconfigSecretRef</span><span class="p">:</span>
+</span><span id="True-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kbind</span>
+</span><span id="True-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider-kubeconfig</span>
+</span><span id="True-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubeconfig</span>
+</span><span id="True-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="nt">schema</span><span class="p">:</span>
+</span><span id="True-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">CRD</span>
+</span><span id="True-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">    </span><span class="nt">pullPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Bound</span>
+</span><span id="True-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="nt">updatePolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Always</span>
+</span><span id="True-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">  </span><span class="nt">autoBind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</span><span id="True-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="nn">---</span>
+</span><span id="True-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">core.kbind.io/v1alpha1</span>
+</span><span id="True-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Binding</span>
+</span><span id="True-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="True-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">widgets</span>
+</span><span id="True-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-a</span>
+</span><span id="True-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="True-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="w">  </span><span class="nt">connectionRef</span><span class="p">:</span>
+</span><span id="True-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
+</span><span id="True-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="w">  </span><span class="nt">apis</span><span class="p">:</span>
+</span><span id="True-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">widgets.example.org</span>
+</span><span id="True-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="w">  </span><span class="nt">conflictPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Fail</span>
 </span></code></pre></div>
 <p>A namespaced Binding is often preferable when only one application's namespace should sync. It is not a namespaced CRD or a replacement for provider/consumer RBAC.</p>
 <p>Use an explicit API allowlist rather than <code>autoBind: true</code> if newly exported provider APIs require review. Use <code>source: CRD</code> when provider labels must remain the opt-in boundary, Auto can fall through to OpenAPI when no labelled CRDs are found.</p>
@@ -2761,11 +2875,11 @@
 <h3 id="externally-managed-schemas">Externally managed schemas</h3>
 <p>Use <code>pullPolicy: None</code> when Git owns the consumer CRD spec. Supply the correct group, resource, scope, usable storage version, status schema/subresource, and compatible validation yourself.</p>
 <p>For OpenAPI-source Connections, include these markers in the consumer CRD:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="True-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">metadata</span><span class="p">:</span>
-</span><span id="True-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
-</span><span id="True-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">core.kbind.io/managed</span><span class="p">:</span><span class="w"> </span><span class="s">"true"</span>
-</span><span id="True-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
-</span><span id="True-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">core.kbind.io/connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="True-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="True-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span>
+</span><span id="True-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">core.kbind.io/managed</span><span class="p">:</span><span class="w"> </span><span class="s">"true"</span>
+</span><span id="True-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+</span><span id="True-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">core.kbind.io/connection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">provider</span>
 </span></code></pre></div>
 <p>For CRD-source Connections, the engine stamps these markers on an existing CRD. Configure your GitOps tool not to fight those metadata changes.</p>
 <p><strong>Important:</strong> <code>None</code> means “do not install the schema,” not “never manage or delete this CRD.” Last-ClusterBinding cleanup currently deletes the referenced CRD even under <code>None</code>. Prefer a carefully controlled Binding lifecycle, disable destructive automatic pruning for shared resources, and read <a href="../synchronization/#delete-a-binding">unbinding behavior</a>.</p>
