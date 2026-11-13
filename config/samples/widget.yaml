@@ -17,26 +17,3 @@ metadata:
   namespace: default
 spec:
   size: large
----
-# Related resources: connection details and tuning the service hands to every
-# consumer. Anything matching the binding's selector syncs to the consumer.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: widgets-connection
-  namespace: default
-  labels:
-    widgets.example.org/related: "true"
-stringData:
-  endpoint: https://widgets.internal.example.org
-  api-key: demo-not-a-real-key
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: widgets-tuning
-  namespace: default
-  labels:
-    widgets.example.org/related: "true"
-data:
-  pointiness: "11"

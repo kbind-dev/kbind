@@ -127,7 +127,7 @@ The engine copies only bound instance `spec` up and `status` down, not arbitrary
 
 ## Related resources do not appear
 
-Check the declared direction and source namespace. `FromProvider` means create the source on the provider, not on the consumer. The full `config/samples/widget.yaml` contains local Secret/ConfigMap manifests as well as a Widget, applying it on the consumer does not demonstrate provider-to-consumer copying.
+Check the declared direction and source namespace. `FromProvider` means create the source on the provider, not on the consumer. The demo defines its source Secret/ConfigMap in `config/samples/provider-widget-crd.yaml`; apply that file on the provider. Apply `config/samples/widget.yaml` only on the consumer. See the [core-only example](gitops.md#try-the-core-without-a-backend) for commands that verify copying and ownership.
 
 Check selectors, source/target RBAC, and target ownership. A foreign Secret/ConfigMap is silently left untouched, `Adopt` and binding instance conflict counts do not apply to these collisions. Source labels are not copied to the target.
 
