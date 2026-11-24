@@ -155,7 +155,7 @@ func (b *Binder) BindFromFile(ctx context.Context) ([]*kubebindv1alpha2.APIServi
 		return nil, fmt.Errorf("failed to create kubeconfig secret: %w", err)
 	}
 
-	results, err := b.createAPIServiceBindings(ctx, result, secretName)
+	results, err := b.createAPIServiceBindings(ctx, result, secretName, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API service bindings: %w", err)
 	}
@@ -247,7 +247,7 @@ func (b *Binder) BindFromResponse(ctx context.Context, response *kubebindv1alpha
 			return nil, fmt.Errorf("failed to create kubeconfig secret: %w", err)
 		}
 
-		results, err := b.createAPIServiceBindings(ctx, result, secretName)
+		results, err := b.createAPIServiceBindings(ctx, result, secretName, response.ProviderID, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create API service bindings: %w", err)
 		}
@@ -304,11 +304,11 @@ func (b *Binder) createKubeconfigSecret(ctx context.Context, remoteHost, remoteN
 	return tempOpts.createKubeconfigSecret(ctx, b.config, remoteHost, remoteNamespace, remoteKubeconfig)
 }
 
-func (b *Binder) createAPIServiceBindings(ctx context.Context, request *kubebindv1alpha2.APIServiceExportRequest, secretName string) ([]*kubebindv1alpha2.APIServiceBinding, error) {
+func (b *Binder) createAPIServiceBindings(ctx context.Context, request *kubebindv1alpha2.APIServiceExportRequest, secretName string, providerID string, isDefault bool) ([]*kubebindv1alpha2.APIServiceBinding, error) {
 	tempOpts := &BindAPIServiceOptions{
 		Options: &base.Options{IOStreams: b.opts.IOStreams},
 	}
-	return tempOpts.createAPIServiceBindings(ctx, b.config, request, secretName)
+	return tempOpts.createAPIServiceBindings(ctx, b.config, request, secretName, providerID, isDefault)
 }
 
 func (b *Binder) getRequestManifest() ([]byte, error) {

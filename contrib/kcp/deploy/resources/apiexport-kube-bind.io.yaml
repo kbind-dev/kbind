@@ -61,7 +61,7 @@ spec:
       crd: {}
   - group: kube-bind.io
     name: apiservicebindings
-    schema: v260122-c9f0f376.apiservicebindings.kube-bind.io
+    schema: v260716-5d02230.apiservicebindings.kube-bind.io
     storage:
       crd: {}
   - group: kube-bind.io

@@ -273,7 +273,7 @@ func (r *reconciler) reconcile(ctx context.Context, clusterName string, cl clien
 	req.Status.Namespace = result.Namespace
 
 	// Create or update the BindingResourceResponse secret
-	if err := r.ensureBindingResponseSecret(ctx, cl, req, result.Kubeconfig, secretName, secretKey); err != nil {
+	if err := r.ensureBindingResponseSecret(ctx, cl, req, result, secretName, secretKey); err != nil {
 		meta.SetStatusCondition(&req.Status.Conditions, metav1.Condition{
 			Type:               string(kubebindv1alpha2.BindableResourcesRequestConditionReady),
 			Status:             metav1.ConditionFalse,
@@ -306,25 +306,26 @@ func (r *reconciler) reconcile(ctx context.Context, clusterName string, cl clien
 	return ctrl.Result{}, nil
 }
 
-// ensureBindingResponseSecret creates or updates a secret containing the BindingResourceResponse
-// with only the kubeconfig set (no authentication or requests).
+// with only the kubeconfig, providerID, and providerNamespace set (no authentication or requests).
 func (r *reconciler) ensureBindingResponseSecret(
 	ctx context.Context,
 	cl client.Client,
 	req *kubebindv1alpha2.BindableResourcesRequest,
-	kubeconfig []byte,
+	result *kubernetes.HandleResourcesResult,
 	secretName string,
 	secretKey string,
 ) error {
 	logger := log.FromContext(ctx)
 
-	// Create the BindingResourceResponse with only kubeconfig
+	// Create the BindingResourceResponse
 	response := kubebindv1alpha2.BindingResourceResponse{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: kubebindv1alpha2.SchemeGroupVersion.String(),
 			Kind:       "BindingResourceResponse",
 		},
-		Kubeconfig: kubeconfig,
+		Kubeconfig:        result.Kubeconfig,
+		ProviderNamespace: result.Namespace,
+		ProviderID:        result.ProviderID,
 	}
 
 	responseBytes, err := json.Marshal(&response)

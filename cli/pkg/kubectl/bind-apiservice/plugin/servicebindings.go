@@ -34,7 +34,7 @@ import (
 	bindclient "github.com/kube-bind/kube-bind/sdk/client/clientset/versioned"
 )
 
-func (b *BindAPIServiceOptions) createAPIServiceBindings(ctx context.Context, config *rest.Config, request *kubebindv1alpha2.APIServiceExportRequest, secretName string) ([]*kubebindv1alpha2.APIServiceBinding, error) {
+func (b *BindAPIServiceOptions) createAPIServiceBindings(ctx context.Context, config *rest.Config, request *kubebindv1alpha2.APIServiceExportRequest, secretName string, providerID string, isDefault bool) ([]*kubebindv1alpha2.APIServiceBinding, error) {
 	bindClient, err := bindclient.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -86,6 +86,8 @@ func (b *BindAPIServiceOptions) createAPIServiceBindings(ctx context.Context, co
 					},
 					Namespace: "kube-bind",
 				},
+				ProviderID: providerID,
+				IsDefault:  isDefault,
 			},
 		}, metav1.CreateOptions{})
 		if err != nil {

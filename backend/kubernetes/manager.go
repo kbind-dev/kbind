@@ -103,6 +103,8 @@ type HandleResourcesResult struct {
 	Kubeconfig []byte
 	// Namespace is the namespace assigned to this binding on the service provider cluster.
 	Namespace string
+	// ProviderID is the UID of the kube-system namespace of the provider cluster.
+	ProviderID string
 }
 
 func (m *Manager) HandleResources(
@@ -181,9 +183,15 @@ func (m *Manager) HandleResources(
 		return nil, err
 	}
 
+	var kubeSystemNS corev1.Namespace
+	if err := c.Get(ctx, types.NamespacedName{Name: "kube-system"}, &kubeSystemNS); err != nil {
+		return nil, fmt.Errorf("failed to get kube-system namespace for ProviderID: %w", err)
+	}
+
 	return &HandleResourcesResult{
 		Kubeconfig: kfgSecret.Data["kubeconfig"],
 		Namespace:  ns,
+		ProviderID: string(kubeSystemNS.UID),
 	}, nil
 }
 

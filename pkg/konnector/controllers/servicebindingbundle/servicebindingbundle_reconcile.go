@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -183,6 +184,27 @@ func (r *reconciler) syncAPIServiceBindings(ctx context.Context, bundle *kubebin
 		return err
 	}
 
+	// Create a standard kubernetes client to get the kube-system namespace UID
+	kubeClient, err := kubernetes.NewForConfig(providerConfig)
+	if err != nil {
+		conditions.MarkFalse(
+			bundle,
+			APIServiceBindingBundleConditionSynced,
+			"ProviderClientError",
+			conditionsapi.ConditionSeverityError,
+			"Failed to create provider core client: %v",
+			err,
+		)
+		return err
+	}
+
+	var providerID string
+	if kubeSystemNs, err := kubeClient.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{}); err == nil {
+		providerID = string(kubeSystemNs.UID)
+	} else {
+		logger.Error(err, "Failed to get kube-system namespace from provider, ProviderID will be empty")
+	}
+
 	// List all APIServiceExports from the provider cluster
 	exports, err := providerClient.KubeBindV1alpha2().APIServiceExports(providerNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -261,6 +283,8 @@ func (r *reconciler) syncAPIServiceBindings(ctx context.Context, bundle *kubebin
 			},
 			Spec: kubebindv1alpha2.APIServiceBindingSpec{
 				KubeconfigSecretRef: bundle.Spec.KubeconfigSecretRef,
+				ProviderID:          providerID,
+				IsDefault:           true,
 			},
 		}
 
