@@ -262,3 +262,8 @@ tolerations: []
 
 # -- Affinity rules for pod scheduling
 affinity: {}
+
+# CRD configuration
+crds:
+  # -- Install CustomResourceDefinitions
+  install: true
