@@ -287,4 +287,4 @@ For existing deployments, follow the documented unbinding procedure while contro
 
 We supplied credentials and bindings directly. A provider serving multiple consumers also needs an onboarding workflow: authenticate the consumer, show available services, and issue credentials.
 
-In **kbind v2: From Core Sync to Service Onboarding**, we’ll add the optional backend and explore `Export`, `Collection`, and `Grant`. The backend will produce the same core inputs we created manually here.
+In [kbind v2: From Core Sync to Service Onboarding](2026-11-26-kbind-v2-service-onboarding.md), we’ll add the optional backend and explore `Export`, `Collection`, and `Grant`. The backend will produce the same core inputs we created manually here.
