@@ -69,7 +69,7 @@ body:
   - type: input
     id: kube_bind_version
     attributes:
-      label: kube-bind version
+      label: kbind version
       description: Version of kubectl-bind plugin or konnector/backend
       placeholder: e.g., v0.0.7
     validations:
