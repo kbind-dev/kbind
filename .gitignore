@@ -10,6 +10,7 @@ __pycache__/
 *.kubeconfig
 .kcp
 .kube-bind
+.kbind
 /dist
 /hack/tools
 /build

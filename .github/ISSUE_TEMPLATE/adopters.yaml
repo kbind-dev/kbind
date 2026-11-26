@@ -1,5 +1,5 @@
 name: Register as adopter
-description: If your organization is using kube-bind, we would be delighted to add you to our list of adopters. Please report how you use kube-bind and we will take care of adding it to our adopters list.
+description: If your organization is using kbind, we would be delighted to add you to our list of adopters. Please report how you use kbind and we will take care of adding it to our adopters list.
 title: "adopter: COMPANY_NAME"
 labels:
   - kind/documentation
@@ -25,7 +25,7 @@ body:
     id: description
     attributes:
       label: Description
-      description: What are you using kube-bind for at your organization? Are you using it for a specific product or project?
+      description: What are you using kbind for at your organization? Are you using it for a specific product or project?
     validations:
       required: true
 
@@ -33,7 +33,7 @@ body:
     id: maturity
     attributes:
       label: Maturity Stage
-      description: What stage are you at in your adoption of kube-bind?
+      description: What stage are you at in your adoption of kbind?
       multiple: false
       options:
         - Production
