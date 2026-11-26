@@ -1,0 +1,8 @@
+apiVersion: startup.example/v1
+kind: Database
+metadata:
+  name: checkout-db
+  namespace: default
+spec:
+  plan: starter
+  storageGB: 10

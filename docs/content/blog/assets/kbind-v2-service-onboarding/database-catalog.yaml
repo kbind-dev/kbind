@@ -1,0 +1,36 @@
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Export
+metadata:
+  name: startup-databases
+spec:
+  title: Startup Databases
+  description: A simulated database service for the checkout application.
+  apis:
+    - name: databases.startup.example
+  defaults:
+    conflictPolicy: Fail
+    relatedResources:
+      - group: ""
+        resource: secrets
+        direction: FromProvider
+        selector:
+          labelSelector:
+            matchLabels:
+              databases.startup.example/related: checkout-db
+      - group: ""
+        resource: configmaps
+        direction: FromProvider
+        selector:
+          labelSelector:
+            matchLabels:
+              databases.startup.example/related: checkout-db
+---
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Collection
+metadata:
+  name: startup-stack
+spec:
+  title: Startup Stack
+  description: Shared services for a growing startup.
+  exports:
+    - name: startup-databases
