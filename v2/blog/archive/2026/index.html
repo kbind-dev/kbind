@@ -2549,6 +2549,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#kbind-v2-from-core-sync-to-service-onboarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kbind v2: From Core Sync to Service Onboarding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#kbind-v2-getting-started" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2630,6 +2641,52 @@
       <header class="md-typeset">
         <h1 id="2026">2026</h1>
       </header>
+      
+        <article class="md-post md-post--excerpt">
+  <header class="md-post__header">
+    
+      <nav class="md-post__authors md-typeset">
+        
+          <span class="md-author">
+            <img src="https://avatars.githubusercontent.com/u/24735571?v=4" alt="Olalekan Odukoya">
+          </span>
+        
+      </nav>
+    
+    <div class="md-post__meta md-meta">
+      <ul class="md-meta__list">
+        <li class="md-meta__item">
+          <time datetime="2026-11-26 00:00:00+00:00">November 26, 2026</time></li>
+        
+        
+          
+          <li class="md-meta__item">
+            
+              8 min read
+            
+          </li>
+        
+        
+      </ul>
+      
+    </div>
+  </header>
+  <div class="md-post__content md-typeset">
+    <h2 id="kbind-v2-from-core-sync-to-service-onboarding"><a class="toclink" href="../../2026/11/26/kbind-v2-service-onboarding/">kbind v2: From Core Sync to Service Onboarding</a></h2>
+<p><em>Part 2: Publish a service and let the backend handle onboarding.</em></p>
+<p>In <a href="../../2026/11/24/kbind-v2-getting-started/">Part 1</a>, we connected two Kubernetes clusters by supplying provider credentials, a Connection, and a ClusterBinding directly. The konnector sent our <code>checkout-db</code> specification to the provider and returned its status to the consumer. That is the core of kbind: consumers work with APIs in their own clusters while providers operate the services elsewhere.</p>
+<p>Supplying those inputs manually is useful for learning and automation. A provider serving application teams also needs a way to present its services, authenticate consumers, and issue credentials. The optional backend supplies that workflow. We’ll use the same simulated Database API, this time discovering and binding it through the catalog and CLI.</p>
+
+    
+      <nav class="md-post__action">
+        <a href="../../2026/11/26/kbind-v2-service-onboarding/">
+          Continue reading
+        </a>
+      </nav>
+    
+    
+  </div>
+</article>
       
         <article class="md-post md-post--excerpt">
   <header class="md-post__header">
