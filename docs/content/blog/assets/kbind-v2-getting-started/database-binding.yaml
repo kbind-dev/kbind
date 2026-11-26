@@ -1,0 +1,36 @@
+apiVersion: core.kbind.io/v1alpha1
+kind: Connection
+metadata:
+  name: database-provider
+spec:
+  kubeconfigSecretRef:
+    namespace: kbind
+    name: database-provider-kubeconfig
+    key: kubeconfig
+  schema:
+    source: CRD
+---
+apiVersion: core.kbind.io/v1alpha1
+kind: ClusterBinding
+metadata:
+  name: startup-databases
+spec:
+  connectionRef:
+    name: database-provider
+  apis:
+    - name: databases.startup.example
+  relatedResources:
+    - group: ""
+      resource: secrets
+      direction: FromProvider
+      selector:
+        labelSelector:
+          matchLabels:
+            databases.startup.example/related: checkout-db
+    - group: ""
+      resource: configmaps
+      direction: FromProvider
+      selector:
+        labelSelector:
+          matchLabels:
+            databases.startup.example/related: checkout-db
