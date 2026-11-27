@@ -1,70 +1,17 @@
 # Cluster Binding
 
-## Overview
+In v2, connecting a consumer has two separate operations: install the konnector, then apply a core bundle that establishes a provider Connection. There is no separate cluster-registration handshake or stored consumer kubeconfig.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant consumer-cluster as Consumer cluster
-    participant client as Client
-    participant provider-backend as Provider backend
-    participant authentication-provider as Authentication Provider
+## Install the konnector
 
-    %% Get provider information
-    client->>+provider-backend: GET "${PROVIDER_BINDING_URL}"
-    provider-backend->>-client: 200 "BindingProvider"
+`GET /api/konnector` returns the core CRDs, namespace, RBAC, ServiceAccount, and Deployment without credentials. It is public and has no server-side write effects. Installing these objects alone does not make the consumer appear in the provider inventory.
 
-    client->>client: Verify "BindingProvider"
+## Connect a provider
 
-    %% Authenticate to provider
-    client-->>authentication-provider: Authenticate to provider
+The [API binding flow](api-binding.md) returns a Secret, Connection, and ClusterBinding. After application, the konnector connects directly to the provider and renews a heartbeat Lease.
 
-    %% Bind to API
-    provider-backend->>client: 200 "BindingResponse"
+`GET /api/clusters` builds the inventory from these Leases and Grants. It is authenticated, but its output is not filtered to the caller's identity.
 
-    client->>consumer-cluster: Ensure kubeconfig secret
+When explicitly enabled, `POST /api/apply` can install the konnector or apply a bundle using a submitted consumer kubeconfig. This sends consumer credentials through the gateway, local CLI or GitOps apply does not.
 
-    loop For each "BindingResponse.requests"
-    client->>consumer-cluster: Bind remote API to consumer cluster
-    end
-```
-
-## Contracts
-
-**BindingResponse**
-
-In case the cluster binding request is accepted, the provider backend **must** ensure that
-
-* the kubeconfig returned in the `BindingResponse` contains a current context
-* the configured current context points to the "cluster namespace"
-* the `ClusterBinding` object named "cluster" exists in the "cluster namespace"
-* the secret referenced by `ClusterBinding.spec.kubeconfigSecretRef.name` exists
-* the key of the secret referenced by `ClusterBinding.spec.kubeconfigSecretRef.key` contains a valid kubeconfig
-* the configured current context points to a user with at least the following permissions in the "cluster namespace" (here expressed as RBAC rules)
-  ```yaml
-  - apiGroups: ["kube-bind.io"]
-    resources: ["apiserviceexportrequests"]
-    verbs: ["create", "delete", "patch", "update", "get", "list", "watch"]
-
-  - apiGroups: ["kube-bind.io"]
-    resources: ["apiserviceexports"]
-    verbs: ["get", "watch", "list"]
-  - apiGroups: ["kube-bind.io"]
-    resources: ["apiserviceexports/status"]
-    verbs: ["get", "patch", "update"]
-
-  - apiGroups: ["kube-bind.io"]
-    resources: ["apiservicenamespaces"]
-    verbs: ["create", "delete", "patch", "update", "get", "list", "watch"]
-
-  - apiGroups: ["kube-bind.io"]
-    resources: ["clusterbindings"]
-    verbs: ["get", "watch", "list"]
-  - apiGroups: ["kube-bind.io"]
-    resources: ["clusterbindings/status"]
-    verbs: ["get", "patch", "update"]
-
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "watch", "list"]
-  ```
+See the [HTTP reference](index.md) for request bodies and responses.

@@ -1,48 +1,76 @@
-# kbind.dev Documentation Setup
+# Documentation and publishing
 
-## Overview
+The v2 site keeps the original MkDocs Material theme, **mike** versioning,
+and directory-based navigation using the **awesome-pages** plugin.
+Content lives under `docs/content`, each section's `.pages` file controls
+its navigation. Only this directory is published, design proposals and
+release-maintenance notes remain repository documents.
 
-Our documentation is powered by [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/) with some
-additional plugins and tools:
+## Build and preview
 
-- [awesome-pages plugin](https://github.com/lukasgeiter/mkdocs-awesome-pages-plugin)
-- [macros plugin](https://mkdocs-macros-plugin.readthedocs.io/en/latest/)
-- [mike](https://github.com/jimporter/mike) for multiple version support
+Use Python with `venv` and the Go version from `go.mod`. CI uses Python
+3.12. From the repository root:
 
-We have support in place for multiple languages (i18n), although we currently only have documentation in English. If
-you're interested in contributing translations, please let us know!
+```bash
+make docs-venv
+make build-docs
+make serve-docs
+```
 
-## File structure
+The first command installs dependencies into the ignored `docs/.venv`.
+`build-docs` generates references and runs a strict MkDocs build.
+`serve-docs` serves a local preview at `http://127.0.0.1:8000`, it does not
+modify any published version or redirect.
 
-All documentation-related items live in `docs` (with the small exception of various `make` targets and some helper
-scripts in `hack`).
+The API generator scans this checkout's `sdk/apis` using a pinned
+`crd-ref-docs` version. The CLI generator uses this checkout's Cobra
+command tree. Generated references and the built site are ignored by git.
+After changing API types or CLI definitions, restart the preview or run
+`make generate-docs` again.
 
-The structure of `docs` is as follows:
+## Non-default v2 publication
 
-| Path                        | Description                                                                       |
-|-----------------------------|-----------------------------------------------------------------------------------|
-| config/$language/mkdocs.yml | Language-specific `mkdocs` configuration.                                         |
-| content/$language           | Language-specific website content.                                                |
-| generated/branch            | All generated content for all languages for the current version.                  |
-| generated/branch/$language  | Generated content for a single language. Never added to git.                      |
-| generated/branch/index.html | Minimal index for the current version that redirects to the default language (en) |
-| overrides                   | Global (not language-specific) content.                                           |
-| Dockerfile                  | Builds the kcp-docs image containing mkdocs + associated tooling.                 |
-| mkdocs.yml                  | Minimal `mkdocs` configuration for `mike` for multi-version support.              |
-| requirements.txt            | List of Python modules used to build the site.                                    |
+The preview is always published as **`v2`**, displayed in the
+version selector as **v2 (preview)**:
 
-## Publishing Workflow
+<https://docs.kbind.dev/v2/>
 
-All documentation building and publishing is done using GitHub Actions in
-[docs-gen-and-push.yaml](../.github/workflows/docs-gen-and-push.yaml). The overall sequence is:
+Publication deliberately does **not** derive the version from the newest
+tag, assign the `latest` alias, call `mike set-default`, or replace the
+root redirect. The existing 0.x versions, `latest`, and custom domain
+stay in the `gh-pages` branch.
 
-1. Generate CLI docs
-2. Generate API docs
-3. Run `mkdocs build` for all languages
-4. Run `mike deploy --push`
+The **Docs** workflow (`.github/workflows/docs-gen-and-push.yaml`)
+builds relevant pull requests without deployment. Pushes to `v2-next`
+or the temporary `docs-v2` preparation branch, and manual dispatches on
+those branches, can publish only in `kbind-dev/kbind` once the workflow
+is committed there. Forks build but
+cannot publish to the canonical site. Publication shares the `Docs`
+concurrency group with the stable docs workflow and never force-pushes.
 
-## Theme Overrides
+## Publish a checkout manually
 
-The goal is to have no full overrides of any theme partials. We currently override `header.html` to customize the
-way the language selection dropdown is rendered. We are working with the theme developers to see if we can help make
-some changes upstream that don't require an override.
+Use a clean checkout containing the intended documentation, review its
+build, and confirm the selected remote is the canonical repository. For
+example, if it is named `upstream`:
+
+```bash
+git remote get-url upstream
+make docs-venv
+REMOTE=upstream make deploy-docs
+git diff --stat upstream/gh-pages..gh-pages
+git diff upstream/gh-pages..gh-pages -- versions.json index.html CNAME latest
+git push upstream gh-pages:gh-pages
+```
+
+`deploy-docs` fetches the existing publishing branch and makes a local mike
+commit. **It does not push by default.** Review that only `v2/` and the
+new `versions.json` entry changed before pushing. If someone publishes in
+the meantime, fetch and rebuild on the updated branch rather than
+force-pushing.
+
+CI passes `PUSH=1` to publish immediately after the strict build.
+`REMOTE` defaults to `origin` and `BRANCH` to `gh-pages`, override them
+only deliberately. There is intentionally no `VERSION` or default-version
+switch in the preview publisher. Making v2 the stable default is a
+separate release decision.

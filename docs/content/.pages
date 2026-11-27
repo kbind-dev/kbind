@@ -1,6 +1,7 @@
 nav:
   - Home:
       - index.md
+      - Community: community
   - Setup: setup
   - Usage: usage
   - Contributing: contributing

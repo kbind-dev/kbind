@@ -7,27 +7,26 @@ weight: 20
 
 # Crossplane Integration
 
-This document provides an example deployment walkthrough showing how to integrate kube-bind with
-Crossplane and how to deploy a sample managed MySQL resource using two kind clusters: a provider
-cluster (where Crossplane runs and kube-bind backend to export APIs) and a consumer cluster (which
-allows to bind those APIs using kube-bind konnector).
+This document provides an example deployment walkthrough showing how to integrate kube-bind with Crossplane and how to deploy a sample managed MySQL resource using two kind clusters: a provider cluster (where Crossplane runs and kube-bind backend to export APIs) and a consumer cluster (which allows to bind those APIs using kube-bind konnector).
 
 !!! note
-    Currently for permission claims to work properly, it is required to run namespaced Crossplane
-    resources.
+    This walkthrough uses namespaced Crossplane resources so the example stays in the same `default` namespace on both clusters.
 
 ![Crossplane example architecture diagram](crossplane.png)
 
 ## Setup
 
-The following sections will guide you through the one-time setup that is required for providing
-MySQL databases using Crossplane and kube-bind.
+The following sections will guide you through the one-time setup that is required for providing MySQL databases using Crossplane and kube-bind.
+
+Follow the [prerequisites](index.md#prerequisites), then select the provider:
+
+```bash
+kubectl config use-context provider
+```
 
 ### Install Crossplane
 
-Install Crossplace in your Kubernetes cluster where the kube-bind backend will run. You can follow
-the [official installation guide](https://docs.crossplane.io/v2.1/get-started/install) from the
-Crossplane documentation.
+Install Crossplace in your Kubernetes cluster where the kube-bind backend will run. You can follow the [official installation guide](https://docs.crossplane.io/v2.1/get-started/install) from the Crossplane documentation.
 
 ```bash
 helm repo add crossplane-stable https://charts.crossplane.io/stable
@@ -42,7 +41,7 @@ helm install crossplane crossplane-stable/crossplane \
 
 In this example, we will set up MySQL database:
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
@@ -55,7 +54,7 @@ EOF
 
 Deploy also Crossplane function for Go templating:
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: pkg.crossplane.io/v1
 kind: Function
@@ -68,10 +67,9 @@ EOF
 
 ### Setup the MySQL Deployment
 
-Create and set up `Deployment`, `PersistentVolume`, `PersistentVolumeClaim` and `Service` for the
-MySQL instance.
+Create and set up `Deployment`, `PersistentVolume`, `PersistentVolumeClaim` and `Service` for the MySQL instance.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -150,14 +148,12 @@ EOF
 
 Time to create a Crossplane XRD and Composition for a managed MySQL database. Apply both manifests:
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
   name: mysqldatabases.mangodb.com
-  labels:
-    kube-bind.io/exported: "true"
 spec:
   scope: Namespaced
   group: mangodb.com
@@ -193,7 +189,7 @@ EOF
 ```
 
 {% raw %}
-```yaml
+```bash
 kubectl apply -f - <<'EOF'
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -333,85 +329,86 @@ EOF
 
 ### Export the Database API
 
-Create an `APIServiceExportTemplate` for the `mysqldatabase.mangodb.com` resource:
+Wait for Crossplane to create the CRD and label that CRD, not the XRD:
 
-```yaml
+```bash
+kubectl wait --for=create crd/mysqldatabases.mangodb.com --timeout=120s
+kubectl wait --for=condition=Established crd/mysqldatabases.mangodb.com --timeout=120s
+kubectl label crd mysqldatabases.mangodb.com core.kbind.io/exported=true --overwrite
+```
+
+Create a catalog `Export` for the `mysqldatabases.mangodb.com` resource:
+
+```bash
 kubectl apply -f - <<EOF
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceExportTemplate
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Export
 metadata:
   name: mysqldatabase
 spec:
-  resources:
-    - group: mangodb.com
-      resource: mysqldatabases
-      versions:
-        - v1
-  permissionClaims:
-  - group: ""
-    resource: secrets
-    selector:
-      labelSelector:
-        matchLabels:
-          kube-bind.io/selector: consumer-database
-  scope: Namespaced
+  title: MySQL Database
+  description: Managed MySQL databases provisioned through Crossplane.
+  apis:
+    - name: mysqldatabases.mangodb.com
+  defaults:
+    relatedResources:
+      - group: ""
+        resource: secrets
+        direction: FromProvider
+        selector:
+          labelSelector:
+            matchLabels:
+              kube-bind.io/selector: consumer-database
 EOF
 ```
 
+This example keeps the provider Secret label used by the original walkthrough. v2 related-resource selectors are label/name based, they do not follow JSONPath or limit credential RBAC.
+
 ## Usage
 
-Now that everything is set up, users can begin to bind to your backend and begin consuming the new
-API.
+Now that everything is set up, users can begin to bind to your backend and begin consuming the new API.
+
+```bash
+kubectl config use-context consumer
+```
 
 ### Login to kube-bind
 
 ```bash
 kubectl bind login https://kube-bind.example.com
+kubectl bind catalog
 ```
 
-### Request a Binding
+### Bind the Export
 
 ```bash
-# Authenticate and select the mysqldatabase export
-kubectl bind
+kubectl bind export mysqldatabase \
+  --kubeconfig=./consumer.kubeconfig \
+  --install-konnector=false
 ```
 
-### Wait for the Binding to be Established
-
-Once the binding is active, you can create `MySQLDatabase` resources in your consumer cluster,
-and you will get `MySQLDatabase` objects synced from the provider cluster.
+The command applies the bundle for the `mysqldatabase` Export to the consumer cluster. It assumes a matching konnector is already installed separately.
 
 ```bash
-kubectl bind
-🌐 Opening kube-bind UI in your browser...
-    https://kube-bind.example.com?redirect_url=....
-
-Browser opened successfully
-Waiting for binding completion from UI...
-   (Press Ctrl+C to cancel)
-
-Binding completed successfully!
-🔒 Updated secret kube-bind/kubeconfig-zxrdn for host https://kube-bind.example.com, namespace kube-bind-bp52k
-🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kbind-dev/konnector:v0.6.0".
-✅ Created APIServiceBinding mysqldatabase-6rvjt for 1 resources
-Created 1 APIServiceBinding(s):
-  - mysqldatabase-6rvjt
-Resources bound successfully!
+kubectl wait --for=condition=Established crd/mysqldatabases.mangodb.com --timeout=120s
 ```
+
+!!! note
+    v2 keeps namespace and name unchanged. This walkthrough keeps the consumer and provider objects in `default` rather than the old prefixed namespace form from the legacy docs.
 
 ### Create a Managed Database
 
 Verify that a `mysqldatabases.mangodb.com` CRD is synced to the consumer cluster:
 
 ```bash
-k get crd mysqldatabases.mangodb.com
+kubectl get crd mysqldatabases.mangodb.com
 NAME                         CREATED AT
 mysqldatabases.mangodb.com   2025-11-27T14:22:18Z
 ```
 
-Order a new consumer database instance in the provider cluster:
+Order a new consumer database instance in the consumer cluster:
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: mangodb.com/v1
 kind: MySQLDatabase
@@ -425,88 +422,26 @@ EOF
 
 ### Wait for Provisioning
 
-The kube-bind konnector and the CloudNativePG operator should now be busy provisioning your
-database. You can observe the provisioned database and connection Secret in the provider cluster:
+The kube-bind konnector and the Crossplane control plane should now be busy provisioning your database. You can observe the provisioned database and connection Secret in the provider cluster, because v2 preserves namespace/name, the synced MySQLDatabase stays in `default`:
 
 ```bash
-kubectl get mysqldatabases.mangodb.com kube-bind-bp52k-consumer-database
+kubectl --context=provider -n default get mysqldatabases.mangodb.com consumer-database
 
 NAME                                           SYNCED   READY   COMPOSITION                        AGE
-kube-bind-bp52k-consumer-database              True     True    mysql-database-simple              18m
+consumer-database                              True     True    mysql-database-simple              18m
 ```
 
 ```bash
-kubectl get secrets -n default
-NAME                                                              TYPE                                DATA   AGE
-consumer-database-connection-secret                               connection.crossplane.io/v1alpha1   4      18m
-consumer-database-secret                                          Opaque                              1      18m
-db-conn                                                           Opaque                              4      20m
-kube-bind-bp52k-consumer-database-credentials                     Opaque                              4      18m
+kubectl --context=consumer -n default get secrets
+NAME                            TYPE     DATA   AGE
+consumer-database-credentials   Opaque   4      18m
 ```
 
 ```bash
-kubectl get mysqldatabases.mangodb.com kube-bind-bp52k-consumer-database -o yaml
+kubectl --context=provider -n default get mysqldatabases.mangodb.com consumer-database -o yaml
 ```
 
-```yaml
-apiVersion: mangodb.com/v1
-kind: MySQLDatabase
-metadata:
-  annotations:
-    kube-bind.io/cluster-namespace: kube-bind-bp52k
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"mangodb.com/v1","kind":"MySQLDatabase","metadata":{"annotations":{},"name":"consumer-database"},"spec":{"name":"consumer-database"}}
-  creationTimestamp: "2025-11-270T15:39:31Z"
-  finalizers:
-  - composite.apiextensions.crossplane.io
-  generation: 4
-  labels:
-    crossplane.io/composite: kube-bind-bp52k-consumer-database
-  name: kube-bind-bp52k-consumer-database
-  ownerReferences:
-  - apiVersion: v1
-    kind: Namespace
-    name: kube-bind-bp52k
-    uid: d20ee5be-e9d7-41e3-95ee-76897a554750
-  resourceVersion: "136223"
-  uid: 5d510666-f5d3-4bf5-98e0-384364a81170
-spec:
-  crossplane:
-    compositionRef:
-      name: mysql-database-simple
-    compositionRevisionRef:
-      name: mysql-database-simple-c36a727
-    compositionUpdatePolicy: Automatic
-    resourceRefs:
-    - apiVersion: mysql.sql.m.crossplane.io/v1alpha1
-      kind: Database
-      name: consumer-database
-    - apiVersion: mysql.sql.m.crossplane.io/v1alpha1
-      kind: User
-      name: consumer-database-user
-    - apiVersion: v1
-      kind: Secret
-      name: consumer-database
-      namespace: default
-  name: consumer-database
-status:
-  conditions:
-  - lastTransitionTime: "2025-11-27T15:39:32Z"
-    observedGeneration: 4
-    reason: ReconcileSuccess
-    status: "True"
-    type: Synced
-  - lastTransitionTime: "2025-11-27T15:39:32Z"
-    observedGeneration: 4
-    reason: Available
-    status: "True"
-    type: Ready
-  connectionSecret: consumer-database
-  ready: true
-```
-
-You should see your MySQL instance created in the provider cluster and a secret with connection
-details, once Crossplane finishes provisioning of the database.
+You should see your MySQL instance created in the provider cluster and a secret with connection details, once Crossplane finishes provisioning of the database.
 
 Observe that the requested Secret with connection details for user is synced to consumer cluster.
 
@@ -519,4 +454,4 @@ default       consumer-database-credentials   Opaque    4      5m21s
 
 ---
 
-For troubleshooting and more information, check the [kube-bind documentation](https://kube-bind.io/docs/).
+For troubleshooting and more information, see [Troubleshooting](../troubleshooting.md).

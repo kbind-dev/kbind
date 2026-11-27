@@ -1,19 +1,16 @@
 ---
 description: >
-  How to setup a development environment for contributing to kube-bind.
+  How to use a kcp provider with the v2 core.
 title: kcp
 ---
 
 # Development Environment using kcp
 
-All the instructions assume you have already cloned the kube-bind repository and have Go installed.
+All the instructions assume you have already cloned the kbind repository and have Go installed.
 
-kcp requires initial setup to be run before it can be used. This includes setting up workspace/provider
-and setting up all the `APIResourceSchemas` and `APIExports`.
+kcp requires initial setup before it can be used. This includes setting up the provider workspace and its `APIResourceSchemas` and `APIExports`. This is not required if you control the setup with your own scripts.
 
-This is not required if you are doing deeper integration, and controlling the setup with your own scripts.
-
-It's good to have the kcp CLI installed to help with workspace management:
+It's useful to have the kcp CLI installed for workspace management:
 
 ```bash
 kubectl krew index add kcp-dev https://github.com/kcp-dev/krew-index.git
@@ -24,148 +21,54 @@ kubectl krew install kcp-dev/create-workspace
 
 ## Preparation
 
-Start kcp:
+Start kcp and populate the provider workspace using the [kcp documentation](https://docs.kcp.io/). v2 does not include the old `make run-kcp` or `kcp-init` bootstrap helpers.
 
-```bash
-make run-kcp
-```
-
-## Backend
-
-### Bootstrap kcp
-
-This is a dedicated step to set up kcp with required workspaces and `APIExports` for kube-bind:
-
-```bash
-cp .kcp/admin.kubeconfig .kcp/backend.kubeconfig
-export KUBECONFIG=.kcp/backend.kubeconfig
-
-./bin/kcp-init --kcp-kubeconfig $KUBECONFIG
-```
-
-### Run the Backend
-
-```bash
-kubectl ws use :root:kube-bind
-
-go run ./cmd/backend \
-  --multicluster-runtime-provider kcp \
-  --oidc-issuer-url=http://127.0.0.1:8080/oidc \
-  --oidc-callback-url=http://127.0.0.1:8080/api/callback \
-  --oidc-type=embedded \
-  --pretty-name="BigCorp.com" \
-  --namespace-prefix="kube-bind-" \
-  --schema-source apiresourceschemas \
-  --consumer-scope=cluster
-```
-
-Optionally add `--fronend=http://localhost:3000` to point to local frontend (must be running
-separately).
-
-This process will keep running, so open a new terminal.
+The workspace should expose only the service APIs intended for consumers. Give the provider credential discovery/OpenAPI access, the required instance permissions, and read access to `logicalclusters.core.kcp.io/cluster`.
 
 ## Provider
 
 ### Kubeconfig Setup
 
-Copy the kubeconfig to the provider and create provider workspace:
+Use a self-contained kubeconfig pointing at the selected logical cluster. Confirm the workspace identity:
 
 ```bash
-cp .kcp/admin.kubeconfig .kcp/provider.kubeconfig
-export KUBECONFIG=.kcp/provider.kubeconfig
-kubectl ws use :root
-kubectl create-workspace provider --enter
+kubectl --kubeconfig=provider.kubeconfig get logicalcluster cluster
 ```
 
-### APIExport
-
-Bind the APIExport to the provider workspace:
-
-```bash
-kubectl kcp bind apiexport root:kube-bind:kube-bind.io \
-  --accept-permission-claim clusterrolebindings.rbac.authorization.k8s.io \
-  --accept-permission-claim clusterroles.rbac.authorization.k8s.io \
-  --accept-permission-claim customresourcedefinitions.apiextensions.k8s.io \
-  --accept-permission-claim serviceaccounts.core \
-  --accept-permission-claim configmaps.core \
-  --accept-permission-claim secrets.core \
-  --accept-permission-claim subjectaccessreviews.authorization.k8s.io \
-  --accept-permission-claim namespaces.core \
-  --accept-permission-claim roles.rbac.authorization.k8s.io \
-  --accept-permission-claim rolebindings.rbac.authorization.k8s.io \
-  --accept-permission-claim apiresourceschemas.apis.kcp.io
-```
-
-### Create CRD in provider
-
-```bash
-kubectl apply -f contrib/kcp/deploy/examples/apiexport.yaml
-kubectl apply -f contrib/kcp/deploy/examples/apiresourceschema-cowboys.yaml
-kubectl apply -f contrib/kcp/deploy/examples/apiresourceschema-sheriffs.yaml
-kubectl kcp bind apiexport root:provider:cowboys-stable
-
-kubectl apply -f deploy/examples/template-cowboys.yaml
-kubectl apply -f deploy/examples/template-sheriffs.yaml
-kubectl apply -f deploy/examples/collection.yaml
-```
-
-### Retrieve the LogicalCluster
-
-```bash
-kubectl get logicalcluster
-# NAME      PHASE   URL
-# cluster   Ready   https://192.168.2.166:6443/clusters/2myqz7lt9i0u5kzb
-```
+The konnector pins that LogicalCluster UID. On a CRD-less provider, choose `schema.source: OpenAPI` explicitly, the current `Auto` path does not fall back when CRD listing returns an error.
 
 ## Consumer
 
 ### Initialization
 
-Now we gonna initiate consumer:
-
-```bash
-cp .kcp/admin.kubeconfig .kcp/consumer.kubeconfig
-export KUBECONFIG=.kcp/consumer.kubeconfig
-
-kubectl ws use :root
-kubectl ws create consumer --enter
-```
+Install the konnector and its three core CRDs on a Kubernetes consumer using the [installation guide](../../setup/helm.md). Deliver the provider kubeconfig as a Secret in the consumer's `kbind` namespace.
 
 ### Binding
 
-Bind the thing:
-
-```bash
-./bin/kubectl-bind login http://127.0.0.1:8080 --cluster 1nso4d2rvleempdp
-./bin/kubectl-bind --dry-run --cluster-identity-namespace default -o yaml > apiserviceexport.yaml
-
-# Extract secret for binding process. Note that secret name is not the same as output from command above. Check secret
-# name by running `kubectl get secret -n kube-bind`
-kubectl get secrets -n kube-bind -o jsonpath='{.items[0].data.kubeconfig}' | base64 -d > remote.kubeconfig
-
-namespace=$(yq '.contexts[0].context.namespace' remote.kubeconfig)
-
-./bin/kubectl-bind apiservice \
-  --remote-kubeconfig remote.kubeconfig \
-  --remote-namespace "$namespace" \
-  --skip-konnector \
-  -f apiserviceexport.yaml \
-  -v 6
+```yaml
+apiVersion: core.kbind.io/v1alpha1
+kind: Connection
+metadata:
+  name: workspace-provider
+spec:
+  kubeconfigSecretRef:
+    namespace: kbind
+    name: workspace-provider
+    key: kubeconfig
+  schema:
+    source: OpenAPI
+    pullPolicy: Bound
+    updatePolicy: Always
 ```
 
-This will keep running, so switch to a new terminal.
+Add a Binding or ClusterBinding selecting the actual `<plural>.<group>` names in that workspace. See [API concepts](../../usage/api-concepts.md) for the manifest and [schema limits](../../usage/api-concepts.md#schema-updates-and-fidelity) before relying on synthesized validation or multi-version behavior.
 
 ### Launch Konnector
 
-Start konnector:
+For a host-run development process rather than a Pod:
 
 ```bash
-./bin/konnector --lease-namespace default --kubeconfig .kcp/consumer.kubeconfig --server-address ":9090"
+KUBECONFIG=consumer.kubeconfig go run ./cmd/konnector
 ```
 
-Create example resources in consumer:
-
-```bash
-kubectl apply -f deploy/examples/cr-cowboy.yaml
-kubectl apply -f deploy/examples/cr-sheriff.yaml
-```
+The core preserves namespace, name, and scope. It does not provision workspaces or translate cluster-scoped APIs into namespaced APIs. The optional backend's in-tree issuer is Kubernetes-specific, its former multicluster-provider flags are not part of the v2 backend.

@@ -1,129 +1,118 @@
 ---
 description: >
-  How to setup a development environment for contributing to kube-bind.
+  Set up a local provider and consumer for kbind development.
 title: kind
 ---
 
 # Development Environment using kind
 
-All the instructions assume you have already cloned the kube-bind repository and have Go installed.
-
-This guide will walk you through setting up kube-bind between two Kubernetes clusters, where
-
-* **Provider cluster**:
-    * Deploys kube-bind backend
-    * Provides kube-bind compatible backend for MangoDB resources
-* **Consumer cluster**:
-    * Provides an application consuming MangoDBs from the provider cluster
-
-This guide works best on Linux. macOS and Windows users may need to adjust some commands accordingly.
+This guide sets up a provider backend, a consumer konnector, and a Widget catalog offering for the [Quickstart](../../setup/quickstart.md). Both processes run on your workstation against two kind clusters.
 
 ## Pre-requisites
 
-To start, you'll need the following tools available in your system:
+- [Docker](https://docs.docker.com/get-docker/), [kind](https://kind.sigs.k8s.io/), and [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl).
+- A v2 source checkout and Go matching `go.mod`.
+- The [kubectl bind plugin](../../setup/kubectl-plugin.md) installed.
 
-* [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
-* [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
-* [`kubectl-bind`](https://github.com/kube-bind/kube-bind/releases/latest) (a kubectl plugin)
-* [`jq`](https://jqlang.github.io/jq/download/)
-* port 8080 and 6443 open on your localhost
-
-To install `kubectl-bind` plugin, please download the archive for your platform from the link above,
-extract it, and place the `kubectl-bind` executable in your system's `$PATH`.
-
-!!! note
-    **Tip:** In case of encountering `Too many open files` error when deploying the Kind clusters,
-    run following commands:
-
-    ```sh
-    sudo sysctl fs.inotify.max_user_watches=524288
-    sudo sysctl fs.inotify.max_user_instances=512
-    ```
-
-    See the [kind documentation](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files)
-    for more details.
+Use disposable clusters. The kubeconfigs below contain administrator credentials, keep them out of version control and remove them after the demo. Run commands from the repository root.
 
 ## Setup
 
-Run `kubectl bind dev create`, which will automatically create two Kind clusters (provider and consumer),
-deploy kube-bind backend in the provider cluster, and print required commands to bind the consumer
-cluster to the provider.
-
-This command will create two Kind clusters named `kind-provider` and `kind-consumer`, set up a
-Docker network for them to communicate, and install kube-bind backend in the provider cluster and
-establish right `hostAlias` entries for communication between clusters.
-
-```sh
-kubectl bind dev create
-```
-
-You should see output similar to this:
-
-```sh
-kubectl bind dev create
-🧪 EXPERIMENTAL: kube-bind dev command is in preview
-📦 Requirements: Docker must be installed and running
-Warning: Could not automatically add host entry. Please run:
-echo '127.0.0.1 kube-bind.dev.local' | sudo tee -a /etc/hosts
-Kind cluster kind-provider already exists, skipping creation
-Wrote kubeconfig kind-provider.kubeconfig
-Helm chart installed successfully
-Provider cluster IP address: 192.168.155.2
-Creating kind cluster kind-consumer with network kube-bind-dev
-Kind cluster kind-consumer created
-Wrote kubeconfig kind-consumer.kubeconfig
-🚀 kube-bind dev environment is ready!
-
-- Provider cluster kubeconfig: kind-provider.kubeconfig
-- Consumer cluster kubeconfig: kind-consumer.kubeconfig
-- kube-bind server URL: http://kube-bind.dev.local:8080
-- Next steps:
-1. Run login to authenticate to the provider cluster:
-
-kubectl bind login http://kube-bind.dev.local:8080
-
-2. Run bind to bind an API service from the provider to the consumer cluster:
-
-KUBECONFIG=kind-consumer.kubeconfig kubectl bind --konnector-host-alias 192.168.155.2:kube-bind.dev.local
-```
-
-!!! note
-    Note `/etc/hosts` modification and 2 commands to run to bind the consumer cluster.
-
-## Login to Provider Cluster
-
-This should give you UI authorization screen.
+Create the two clusters and save their kubeconfigs:
 
 ```bash
-kubectl bind login http://kube-bind.dev.local:8080
+kind create cluster --name provider
+kind create cluster --name consumer
+
+kind get kubeconfig --name provider > provider.kubeconfig
+kind get kubeconfig --name consumer > consumer.kubeconfig
+make backend konnector
 ```
 
-## Bind First Provider API Service
+These kubeconfigs use workstation endpoints. They work for the host-run processes below, not for konnector Pods in another cluster.
+
+## Provider
+
+In a second terminal, start the backend:
 
 ```bash
-export KUBECONFIG=kind-consumer.kubeconfig
-kubectl bind --konnector-host-alias 192.168.155.2:kube-bind.dev.local
+KUBECONFIG="$PWD/provider.kubeconfig" ./bin/backend \
+  --oidc-mock --external-url=http://localhost:8080
 ```
 
-Now in the consumer cluster you should see these CRDs:
+Leave it running. Mock OIDC automatically approves logins and is for this local development environment only. The backend installs its catalog and IAM CRDs.
+
+Back in the first terminal, wait for the catalog APIs and seed the example:
 
 ```bash
-kubectl get crd
-NAME                              CREATED AT
-apiservicebindings.kube-bind.io   2025-11-12T08:10:48Z
-mangodbs.mangodb.com              2025-11-12T08:10:56Z
+kubectl --kubeconfig=provider.kubeconfig \
+  wait --for=condition=Established --timeout=120s \
+  crd/exports.catalog.kbind.io crd/collections.catalog.kbind.io
+kubectl --kubeconfig=provider.kubeconfig \
+  apply -f hack/tilt/seed/widgets.yaml
+kubectl --kubeconfig=provider.kubeconfig \
+  wait --for=condition=Ready exports.catalog.kbind.io/widgets --timeout=120s
 ```
 
-Try creating an example MangoDB resource and observe it being synced to provider clusters:
+The manifest installs the Widget CRD, related Secret and ConfigMap, an Export, and a Collection. It does not include a Widget controller.
+
+## Consumer
+
+Install the core CRDs:
 
 ```bash
-kubectl bind dev example | kubectl create -f -
-KUBECONFIG=kind-consumer.kubeconfig kubectl get mangodbs.mangodb.com
-KUBECONFIG=kind-provider.kubeconfig kubectl get mangodbs.mangodb.com
+kubectl --kubeconfig=consumer.kubeconfig apply \
+  -f sdk/config/crd/core.kbind.io_connections.yaml \
+  -f sdk/config/crd/core.kbind.io_clusterbindings.yaml \
+  -f sdk/config/crd/core.kbind.io_bindings.yaml
+kubectl --kubeconfig=consumer.kubeconfig \
+  wait --for=condition=Established --timeout=120s \
+  crd/connections.core.kbind.io crd/clusterbindings.core.kbind.io \
+  crd/bindings.core.kbind.io
 ```
+
+In a third terminal, start the konnector:
+
+```bash
+KUBECONFIG="$PWD/consumer.kubeconfig" ./bin/konnector
+```
+
+Leave it running. Do not also install a konnector Deployment on this consumer.
+
+## Login and bind a service
+
+The environment is ready:
+
+| Setting | Value |
+| --- | --- |
+| Provider kubeconfig | `provider.kubeconfig` |
+| Consumer kubeconfig | `consumer.kubeconfig` |
+| Backend URL | `http://localhost:8080` |
+| Catalog Export | `widgets` |
+
+Return to the [Quickstart](../../setup/quickstart.md#quick-development-setup) to log in, bind the Widget API, and create an instance.
+
+The example Secret and ConfigMap are copied from the provider after binding. For instance status updates, simulate the service controller:
+
+```bash
+kubectl --kubeconfig=provider.kubeconfig -n default \
+  patch widget my-widget --subresource=status --type=merge \
+  -p '{"status":{"phase":"Running"}}'
+kubectl --kubeconfig=consumer.kubeconfig -n default \
+  wait --for=jsonpath='{.status.phase}'=Running widget/my-widget --timeout=120s
+```
+
+See [Synchronization](../../usage/synchronization.md) for spec, status, related resources, and unbinding behavior.
 
 ## Cleanup
 
-```sh
-kind bind dev delete
+Stop both host processes with Ctrl-C. Remove only the disposable clusters and credentials created for this walkthrough:
+
+```bash
+kind delete cluster --name consumer
+kind delete cluster --name provider
+rm provider.kubeconfig consumer.kubeconfig
+unset KUBECONFIG
 ```
+
+For shared clusters, [unbind](../../usage/synchronization.md#unbinding-and-deletion) while the konnector and credentials still work instead of deleting the clusters.

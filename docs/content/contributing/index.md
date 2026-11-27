@@ -1,23 +1,19 @@
 # Contributing to kbind
 
-kbind is [Apache 2.0 licensed](https://github.com/kbind-dev/kbind/tree/main/LICENSE) and we accept contributions via
-GitHub pull requests.
+kbind is [Apache 2.0 licensed](https://github.com/kbind-dev/kbind/tree/main/LICENSE) and we accept contributions via GitHub pull requests.
 
 Please read the following guide if you're interested in contributing to kube-bind.
 
 ## Certificate of Origin
 
-By contributing to this project you agree to the Developer Certificate of
-Origin (DCO). This document was created by the Linux Kernel community and is a
-simple statement that you, as a contributor, have the legal right to make the
-contribution. See the [DCO](https://github.com/kbind-dev/kbind/tree/main/DCO) file for details.
+By contributing to this project you agree to the Developer Certificate of Origin (DCO). This document was created by the Linux Kernel community and is a simple statement that you, as a contributor, have the legal right to make the contribution. See the [DCO](https://github.com/kbind-dev/kbind/tree/main/DCO) file for details.
 
 ## Getting Started
 
 ### Prerequisites
 
 1. Clone this repository.
-2. [Install Go](https://golang.org/doc/install) (currently 1.22).
+2. [Install Go](https://golang.org/doc/install) using the version declared in `go.mod`.
 3. Install [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl).
 
 More on the development environment setup can be found in the [developer guide](../developers/dev-environment/index.md).
@@ -39,28 +35,20 @@ Finally, we welcome and value all types of contributions, beyond "just code"! Ot
 
 ### Getting your PR Merged
 
-The `kbind` project uses `OWNERS` files to denote the collaborators who can assist you in getting your PR merged.  There
-are two roles: reviewer and approver.  Merging a PR requires sign off from both a reviewer and an approver.
+The `kbind` project uses `OWNERS` files to denote the collaborators who can assist you in getting your PR merged.  There are two roles: reviewer and approver.  Merging a PR requires sign off from both a reviewer and an approver.
 
 ## Community Roles
 
 ### Reviewers
 
-Reviewers are responsible for reviewing code for correctness and adherence to standards. Oftentimes reviewers will
-be able to advise on code efficiency and style as it relates to golang or project conventions as well as other considerations
-that might not be obvious to the contributor.
+Reviewers are responsible for reviewing code for correctness and adherence to standards. Oftentimes reviewers will be able to advise on code efficiency and style as it relates to golang or project conventions as well as other considerations that might not be obvious to the contributor.
 
 ### Approvers
 
-Approvers are responsible for sign-off on the acceptance of the contribution. In essence, approval indicates that the
-change is desired and good for the project, aligns with code, API, and system conventions, and appears to follow all required
-process including adequate testing, documentation, follow ups, or notifications to other areas who might be interested
-or affected by the change.
+Approvers are responsible for sign-off on the acceptance of the contribution. In essence, approval indicates that the change is desired and good for the project, aligns with code, API, and system conventions, and appears to follow all required process including adequate testing, documentation, follow ups, or notifications to other areas who might be interested or affected by the change.
 
 Approvers are also reviewers.
 
 ### Management of `OWNERS` Files
 
-If a reviewer or approver no longer wishes to be in their current role it is requested that a PR
-be opened to update the `OWNERS` file. `OWNERS` files may be periodically reviewed and updated based on project activity
-or feedback to ensure an acceptable contributor experience is maintained.
+If a reviewer or approver no longer wishes to be in their current role it is requested that a PR be opened to update the `OWNERS` file. `OWNERS` files may be periodically reviewed and updated based on project activity or feedback to ensure an acceptable contributor experience is maintained.

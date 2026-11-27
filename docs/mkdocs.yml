@@ -1,4 +1,5 @@
 site_name: kbind
+site_description: "kbind v2: bind provider APIs into consumer Kubernetes clusters."
 repo_url: https://github.com/kbind-dev/kbind
 repo_name: kbind-dev/kbind
 site_url: https://docs.kbind.dev/
@@ -7,6 +8,7 @@ site_url: https://docs.kbind.dev/
 docs_dir: "content"
 # Where to generate
 site_dir: "generated"
+strict: true
 
 theme:
   name: material
@@ -72,6 +74,7 @@ plugins:
   - social:
       cards_layout: default/variant
       cards_layout_options:
+        logo: overrides/logo.png
         background_color: "#1a1a1a"
         color: "#ffffff"
         font_family: Roboto
@@ -134,3 +137,8 @@ watch:
   - mkdocs.yml
   - content
   - overrides
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn

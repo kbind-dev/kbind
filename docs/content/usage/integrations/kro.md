@@ -7,48 +7,37 @@ weight: 30
 
 # kro Integration (providing LoadBalancer as a Service)
 
-This guide demonstrates how to use [kro](https://kro.run/) and
-[Envoy Gateway](https://gateway.envoyproxy.io/) to offer a "LoadBalancer as a Service" API in
-multi-cluster environments.
+This guide demonstrates how to use [kro](https://kro.run/) and [Envoy Gateway](https://gateway.envoyproxy.io/) to offer a "LoadBalancer as a Service" API in multi-cluster environments.
 
-When operating multiple clusters on-premises, managing load balancer infrastructure separately
-for each cluster becomes operationally expensive. This integration enables a centralized load
-balancer cluster that serves all tenant clusters connected via converged networking solutions.
-By running load balancer resources in a dedicated load balancer cluster, organizations can simplify
-operations for application teams who can self-service load balancers without managing the
-underlying infrastructure and enforce consistent security policies and configuration across
-gateways.
+When operating multiple clusters on-premises, managing load balancer infrastructure separately for each cluster becomes operationally expensive. This integration enables a centralized load balancer cluster that serves all tenant clusters connected via converged networking solutions. By running load balancer resources in a dedicated load balancer cluster, organizations can simplify operations for application teams who can self-service load balancers without managing the underlying infrastructure and enforce consistent security policies and configuration across gateways.
 
 ![kro gateway-api example architecture diagram](kro-gw-api.png)
 
-In this guide in the consumer cluster we create a simple `LoadBalancer` object, and the provider
-automatically provisions an Envoy Gateway infrastructure and related `Gateway` and `HTTPRoute` to
-expose the service between two kind clusters.
+In this guide in the consumer cluster we create a simple `LoadBalancer` object, and the provider automatically provisions an Envoy Gateway infrastructure and related `Gateway` and `HTTPRoute` to expose the service between two kind clusters.
 
-This example includes support for syncing **custom configuration (via ConfigMaps or Secrets)** from
-consumer clusters to the provider.
+This example includes support for syncing **custom configuration (via ConfigMaps or Secrets)** from consumer clusters to the provider.
 
 !!! note
-    For this to work end-to-end, the consumer's service (`backend`) must be reachable from the
-    provider cluster (e.g., via multi-cluster networking).
+    For this to work end-to-end, the consumer's service (`backend`) must be reachable from the provider cluster (e.g., via multi-cluster networking).
 
-    In this example, we simulate multi-cluster networking by exposing the consumer's backend
-    service via NodePort and creating corresponding Service/EndpointSlice in the provider cluster.
-    In production, you would use proper multi-cluster networking solutions like Submariner or
-    Cilium cluster mesh.
+    In this example, we simulate multi-cluster networking by exposing the consumer's backend service via NodePort and creating corresponding Service/EndpointSlice in the provider cluster. In production, you would use proper multi-cluster networking solutions like Submariner or Cilium cluster mesh.
 
 ## Prerequisites
 
-In this integration guide, we will be using `kubectl bind dev` command to provision two kind
-clusters. More details on the command you can find [here](../../developers/dev-environment/index.md).
+This integration guide uses two kind clusters, one provider and one consumer. Provision them using your preferred workflow and keep the resulting kubeconfigs handy.
 
 *   **Provider Cluster:** Runs kro, Envoy Gateway, and the kube-bind backend.
 *   **Consumer Cluster:** Runs the kube-bind konnector.
 
 ## Setup On The Provider Cluster
 
-The following sections will guide you through the one-time setup that is required for providing
-LoadBalancer as a Service using kro and kube-bind.
+The following sections will guide you through the one-time setup that is required for providing LoadBalancer as a Service using kro and kube-bind.
+
+Follow the [prerequisites](index.md#prerequisites), then select the provider:
+
+```bash
+kubectl config use-context provider
+```
 
 ### Install Envoy Gateway
 
@@ -60,7 +49,7 @@ helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.6.1 -n envo
 
 Install GatewayClass to be managed by Envoy Gateway.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -76,12 +65,12 @@ EOF
 Fetch the consumer cluster node IP.
 
 ```bash
-export CONSUMER_NODE_IP=$(KUBECONFIG=kind-consumer.kubeconfig kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+export CONSUMER_NODE_IP=$(kubectl --context=consumer get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 ```
 
 Setup the provider cluster service to allow connection to the backend application in consumer cluster.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Service
@@ -128,11 +117,9 @@ helm install kro oci://registry.k8s.io/kro/charts/kro \
 
 ### Define the LoadBalancer ResourceGroup
 
-Create a kro `ResourceGraphDefinition` that defines the API `loadbalancers.networking.kro.run`.
-This definition includes referencing a `ConfigMap` for custom routing rules (e.g., adding headers).
-The same way user could reference a `Secret` with `Certificate` to setup TLS.
+Create a kro `ResourceGraphDefinition` that defines the API `loadbalancers.networking.kro.run`. This definition includes referencing a `ConfigMap` for custom routing rules (e.g., adding headers). The same way user could reference a `Secret` with `Certificate` to setup TLS.
 
-```yaml
+```bash
 kubectl apply -f - <<'EOF'
 apiVersion: kro.run/v1alpha1
 kind: ResourceGraphDefinition
@@ -145,7 +132,7 @@ spec:
     group: networking.kro.run
     metadata:
       labels:
-        kube-bind.io/exported: "true"
+        core.kbind.io/exported: "true"
     spec:
       domain: string
       configMapRef: string
@@ -219,78 +206,77 @@ EOF
 
 ### Export the LoadBalancer API
 
-Create an `APIServiceExportTemplate`. Crucially, we add **PermissionClaims** to allow the provider
-to read the ConfigMaps that the consumer will create and reference.
+Wait for kro to create the CRD and explicitly mark that CRD as exported:
 
-```yaml
+```bash
+kubectl wait --for=create crd/loadbalancers.networking.kro.run --timeout=120s
+kubectl wait --for=condition=Established crd/loadbalancers.networking.kro.run --timeout=120s
+kubectl label crd loadbalancers.networking.kro.run core.kbind.io/exported=true --overwrite
+```
+
+Create a catalog `Export`. Crucially, we add a related-resource rule so the provider can read the ConfigMap that the consumer will create and reference.
+
+```bash
 kubectl apply -f - <<EOF
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceExportTemplate
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Export
 metadata:
-    name: loadbalancer
+  name: loadbalancer
 spec:
-  resources:
-  - group: networking.kro.run
-    resource: loadbalancers
-    versions:
-    - v1alpha1
-  permissionClaims:
-  - group: ""
-    resource: configmaps
-    selector:
-      references:
-      - resource: loadbalancers
-        group: networking.kro.run
-        jsonPath:
-          name: 'spec.configMapRef'
-  scope: Namespaced
+  title: LoadBalancer as a Service
+  description: Provision load balancers with kro and Envoy Gateway.
+  apis:
+    - name: loadbalancers.networking.kro.run
+  defaults:
+    relatedResources:
+      - group: ""
+        resource: configmaps
+        direction: FromConsumer
+        selector:
+          names:
+            - my-lb-config
 EOF
 ```
 
+This walkthrough keeps the ConfigMap name fixed. v2 related-resource selectors are name/label based, they do not follow `spec.configMapRef`.
+
 ## Setup on the Consumer Cluster
 
-Now that everything is set up, users can begin to bind to your backend and begin consuming the
-new API.
+Now that everything is set up, users can begin to bind to your backend and begin consuming the new API.
+
+```bash
+kubectl config use-context consumer
+```
 
 ### Login to kube-bind
 
+```bash
+kubectl bind login https://kube-bind.example.com
+kubectl bind catalog
+```
+
+### Bind the Export
+
+```bash
+kubectl bind export loadbalancer \
+  --kubeconfig=./consumer.kubeconfig \
+  --install-konnector=false
+```
+
+The command applies the bundle for the `loadbalancer` Export to the consumer cluster. It assumes a matching konnector is already installed separately.
+
+```bash
+kubectl wait --for=condition=Established crd/loadbalancers.networking.kro.run --timeout=120s
+```
+
 !!! note
-    When you run `kubectl bind dev create`, **save the output** as it contains important
-    information (like cluster IPs and configuration) that will be needed throughout this guide.
-    This output is unique for each user and environment.
-
-```bash
-kubectl bind login http://kube-bind.dev.local:8080
-# Authenticate and select the loadbalancer export
-kubectl bind --konnector-host-alias 172.18.0.3:kube-bind.dev.local
-```
-
-### Wait for the Binding to be Established
-
-Once the binding is active, you can create `LoadBalancer` resources in your consumer cluster, and
-you will get `LoadBalancer` objects synced from the provider cluster.
-
-```bash
-kubectl bind
-🌐 Opening kube-bind UI in your browser...
-    https://kube-bind.dev.local:8080?redirect_url=....
-Browser opened successfully
-Waiting for binding completion from UI...
-  (Press Ctrl+C to cancel)
-Binding completed successfully!
-🔒 Updated secret kube-bind/kubeconfig-zdrdn for host https://kube-bind.dev.local, namespace kube-bind-wz2g5
-🚀 Deploying konnector v0.6.0 to namespace kube-bind with custom image "ghcr.io/kbind-dev/konnector:v0.6.0".
-✅ Created APIServiceBinding loadbalancer for 1 resources
-Created 1 APIServiceBinding(s):
-  - loadbalancer
-Resources bound successfully!
-```
+    v2 keeps namespace and name unchanged. This walkthrough uses `default` in both clusters rather than the old prefixed namespace form from the legacy docs.
 
 ### Create Dependencies
 
 The consumer creates the `ConfigMap` that will be referenced by the `LoadBalancer`.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ConfigMap
@@ -304,7 +290,7 @@ EOF
 
 Deploy backend application into consumer cluster.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ServiceAccount
@@ -367,7 +353,7 @@ EOF
 
 Reference the `ConfigMap` created above.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
 apiVersion: networking.kro.run/v1alpha1
 kind: LoadBalancer
@@ -385,15 +371,14 @@ EOF
 
 ### Observe the Provisioning
 
-**Provider Side:** kube-bind syncs the ConfigMap back to the provider namespace. kro creates the
-Gateway, Route and ReferenceGrant, and Envoy Gateway provisions the load balancer.
+**Provider Side:** kube-bind syncs the ConfigMap back to the provider namespace. kro creates the Gateway, Route and ReferenceGrant, and Envoy Gateway provisions the load balancer.
 
 **Consumer Side:** The status is updated with the provider status.
 
 Check `LoadBalancer` in the consumer cluster.
 
 ```bash
-kubectl get loadbalancer my-lb
+kubectl --context=consumer -n default get loadbalancer my-lb
 ```
 
 ```bash
@@ -404,16 +389,16 @@ default     my-lb       ACTIVE   True    14s
 Check `LoadBalancer` in the provider cluster and if the `ConfigMap` is synced.
 
 ```bash
-kubectl get loadbalancers.networking.kro.run -A
+kubectl --context=provider -n default get loadbalancers.networking.kro.run
 ```
 
 ```bash
-NAMESPACE                 NAME        STATE    READY   AGE
-kube-bind-wz2g5-default   my-lb       ACTIVE   True    15s
+NAMESPACE   NAME   STATE    READY   AGE
+default     my-lb  ACTIVE   True    15s
 ```
 
 ```bash
-kubectl get cm -n kube-bind-wz2g5-default
+kubectl --context=provider -n default get cm
 ```
 
 ```bash
@@ -424,32 +409,21 @@ my-lb-config       1      15s
 
 ## Appendix
 
-Test the connection with provisioned load balancer and verify that `hello-kube-bind` header was
-added from the ConfigMap.
+Test the connection with provisioned load balancer and verify that `hello-kube-bind` header was added from the ConfigMap.
 
 !!! note
-    For the basic check in this example, we will do port-forward. To be able to use LoadBalancer
-    service IP in the kind cluster you would need to setup additional measures like
-    [metalb](https://github.com/metallb/metallb) or
-    [cloud-provider-kind](https://github.com/kubernetes-sigs/cloud-provider-kind).
+    For the basic check in this example, we will do port-forward. To be able to use LoadBalancer service IP in the kind cluster you would need to setup additional measures like [metalb](https://github.com/metallb/metallb) or [cloud-provider-kind](https://github.com/kubernetes-sigs/cloud-provider-kind).
 
-On the provider cluster list the Envoy services and find corresponding service name for the
-gateway.
+On the provider cluster list the Envoy services and find corresponding service name for the gateway.
 
 ```bash
-kubectl get services -n envoy-gateway-system
+kubectl --context=provider get services -n envoy-gateway-system
 ```
 
-```bash
-NAME                                                  TYPE           CLUSTER-IP      EXTERNAL-IP   PORT(S)                                           AGE
-envoy-gateway                                         ClusterIP      10.96.199.212   <none>        18000/TCP,18001/TCP,18002/TCP,19001/TCP,9443/TCP  4d23h
-envoy-kube-bind-wz2g5-default-my-lb-gw-9f962ab2       LoadBalancer   10.96.231.200   <pending>     80:32515/TCP                                      4d19h
-```
-
-Port forward the related service.
+Port forward the related service for `my-lb`.
 
 ```bash
-kubectl -n envoy-gateway-system port-forward service/envoy-kube-bind-wz2g5-default-my-lb-gw-9f962ab2  8888:80
+kubectl --context=provider -n envoy-gateway-system port-forward service/<generated-service-name> 8888:80
 ```
 
 Send the request through the gateway service to your backend application.

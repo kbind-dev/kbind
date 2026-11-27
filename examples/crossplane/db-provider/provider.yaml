@@ -1,6 +1,0 @@
-apiVersion: pkg.crossplane.io/v1
-kind: Provider
-metadata:
-  name: provider-sql
-spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-sql:v0.13.0

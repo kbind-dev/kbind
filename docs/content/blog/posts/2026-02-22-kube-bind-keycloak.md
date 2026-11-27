@@ -9,9 +9,12 @@ authors:
 
 # Securing kube-bind with Keycloak: A Production-Ready OIDC Setup
 
+!!! note "Historical 0.x article"
+    The Keycloak walkthrough is preserved from the 0.x documentation. Backend flags and callbacks have changed, use the [v2 OIDC configuration](../../developers/backend/oidc/index.md).
+
 In this tutorial, I'll be showing you how to integrate Keycloak into `kube-bind` so that authentication is handled by an external identity provider instead of the embedded mock one.
 
-If you've been following along from the [previous posts](2026-02-14-kube-bind-internals.md), you know that `kube-bind` lets you project APIs from a provider cluster into a consumer cluster. To do that securely, it uses OIDC for authentication. In the quickstart guide, we used the embedded OIDC provider — which is great for tinkering locally, but absolutely not something you'd ship to production.
+If you've been following along from the [previous posts](2026-02-14-kube-bind-internals.md), you know that `kube-bind` lets you project APIs from a provider cluster into a consumer cluster. To do that securely, it uses OIDC for authentication. In the quickstart guide, we used the embedded OIDC provider, which is great for tinkering locally, but absolutely not something you'd ship to production.
 
 In production, you want a proper identity provider. One that manages users, groups, tokens, and sessions correctly. For this, we'll be making use of Keycloak.
 
@@ -47,7 +50,7 @@ graph TB
     Konnector --> BoundCRD
 ```
 
-The key difference from the dev setup is steps 2 and 3 — instead of clicking through a mock login screen, users are redirected to Keycloak's real login page. `kube-bind` validates the resulting tokens against Keycloak's OIDC discovery endpoint.
+The key difference from the dev setup is steps 2 and 3, instead of clicking through a mock login screen, users are redirected to Keycloak's real login page. `kube-bind` validates the resulting tokens against Keycloak's OIDC discovery endpoint.
 
 ## Prerequisites
 
@@ -56,7 +59,7 @@ You'll need:
 - [kind](https://kind.sigs.k8s.io/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/) 3.x
-- The `kube-bind` CLI — see [Quick Start](2026-02-14-kube-bind-quickstart.md) for installation
+- The `kube-bind` CLI, see [Quick Start](2026-02-14-kube-bind-quickstart.md) for installation
 
 > **Note:** We'll use port-forwarding here to keep things simple. A production setup would use a proper Ingress or Gateway with TLS. See [Installation with Helm](../../setup/helm.md) for that.
 
@@ -168,8 +171,7 @@ Wait for it to come up (Heads up: this chart deploys a **StatefulSet**, not a De
 kubectl rollout status statefulset/keycloak -n keycloak --timeout=120s
 ```
 
-Patch the service to expose port 8443 for OIDC compatibility since we're
-technically running the cluster in our local machine.
+Patch the service to expose port 8443 for OIDC compatibility since we're technically running the cluster in our local machine.
 
 ```bash
 kubectl patch service keycloak-http -n keycloak --type='json' -p='[
@@ -196,14 +198,14 @@ Log in with `admin` / `admin123`. You should see the Keycloak admin console.
 
 This is the most important step. We need to set up a few things in Keycloak:
 
-1. A **Realm** — a logical namespace for our identity space
-2. A **Client** — representing the `kube-bind` backend
-3. A **Group** — to control which users can bind services
-4. A **User** — so we have someone to log in as
+1. A **Realm**, a logical namespace for our identity space
+2. A **Client**, representing the `kube-bind` backend
+3. A **Group**, to control which users can bind services
+4. A **User**, so we have someone to log in as
 
 ### Create a Realm
 
-In the top-left corner of the admin console, you'll see a **Manage realms** option; click it. You'll see a list of realms, one of which is named `master`. We won't be using that one. Click on the **Create realm** button.
+In the top-left corner of the admin console, you'll see a **Manage realms** option, click it. You'll see a list of realms, one of which is named `master`. We won't be using that one. Click on the **Create realm** button.
 
 ![Create Keycloak Realm](images/keycloak-create-realm.png)
 
@@ -398,7 +400,7 @@ Run the login command:
 kubectl bind login http://kube-bind.local:8080
 ```
 
-Your browser will open — and instead of the mock login page, you'll see **Keycloak's real login form**. Log in with `platform-operator` and the password you set earlier.
+Your browser will open, and instead of the mock login page, you'll see **Keycloak's real login form**. Log in with `platform-operator` and the password you set earlier.
 
 ![Keycloak Login Form](images/keycloak-login-form.png)
 
@@ -481,7 +483,7 @@ NAME         AGE
 wyatt-earp   4s
 ```
 
-The resource is created in the consumer cluster and synced to the provider — all authenticated through Keycloak.
+The resource is created in the consumer cluster and synced to the provider, all authenticated through Keycloak.
 
 ---
 

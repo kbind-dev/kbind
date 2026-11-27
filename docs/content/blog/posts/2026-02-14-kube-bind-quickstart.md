@@ -9,6 +9,9 @@ authors:
 
 # Getting Started with kube-bind: The Quick Way
 
+!!! note "Historical 0.x article"
+    This article is preserved from the 0.x documentation. Its commands and API names are not v2 instructions, use the [v2 quickstart](../../setup/quickstart.md).
+
 `kube-bind` facilitates service sharing between Kubernetes clusters. It allows a **Service Provider** cluster to export APIs and a **Consumer** cluster to bind to them, projecting the resources into the consumer's cluster. This enables seamless cross-cluster consumption without complex networking or federation.
 
 Here is what we will build:

@@ -1,47 +1,89 @@
 name: Docs
 
 on:
-  # So we can trigger manually if needed
   workflow_dispatch:
-  # To confirm any changes to docs build successfully, without deploying them
   pull_request:
-  # Pushes to branches do the full build + deployment
-  push:
-    tags:
-      - 'v*'
     branches:
-      - main
-      - "release-*"
+      - v2-next
     paths:
-      - "cmd/**"
       - "docs/**"
+      - "cli/**"
+      - "cmd/**"
+      - "backend/**"
+      - "engine/**"
       - "pkg/**"
+      - "deploy/charts/**"
+      - "sdk/apis/**"
+      - "go.mod"
+      - "go.sum"
+      - "sdk/go.mod"
+      - "sdk/go.sum"
+      - "Makefile"
+      - ".github/workflows/docs-gen-and-push.yaml"
+  push:
+    branches:
+      - v2-next
+      - docs-v2
+    paths:
+      - "docs/**"
+      - "cli/**"
+      - "cmd/**"
+      - "backend/**"
+      - "engine/**"
+      - "pkg/**"
+      - "deploy/charts/**"
+      - "sdk/apis/**"
+      - "go.mod"
+      - "go.sum"
+      - "sdk/go.mod"
+      - "sdk/go.sum"
+      - "Makefile"
       - ".github/workflows/docs-gen-and-push.yaml"
 
 permissions:
-  contents: write
-
-concurrency:
-  group: ${{ github.workflow }}
+  contents: read
 
 jobs:
-  generate-and-push:
-    name: Docs
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - run: git fetch origin gh-pages
-      - run: git fetch origin '+refs/tags/v*:refs/tags/v*' --no-tags
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: v1.26.9
-          cache: true
-
+          go-version-file: go.mod
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: make docs-venv build-docs
 
-      - run: make generate-cli-docs generate-api-docs deploy-docs
+  publish:
+    if: >-
+      github.repository == 'kbind-dev/kbind' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/v2-next' || github.ref == 'refs/heads/docs-v2')
+    needs: build
+    permissions:
+      contents: write
+    concurrency:
+      group: Docs
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - name: Publish preview without changing latest
+        env:
+          PUSH: "1"
+        run: |
+          git config user.name "kbind-ci-bot"
+          git config user.email "no-reply@kbind.dev"
+          make docs-venv deploy-docs

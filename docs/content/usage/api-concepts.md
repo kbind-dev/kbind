@@ -1,516 +1,191 @@
 ---
 title: API Concepts
-description: |
-  Deep dive into kube-bind's core API types, their relationships, and how they work together to enable cross-cluster service binding.
+description: >
+  Core API types, their relationships, and cross-cluster service binding.
 weight: 210
 ---
 
-# kube-bind API Concepts
+# kbind API Concepts
 
-This guide provides a comprehensive overview of kube-bind's core API types and how they work together to enable secure, cross-cluster service binding.
+This guide provides an overview of kbind's core API types, their relationships, and how they work together to enable cross-cluster service binding.
 
 ## Overview
 
-kube-bind uses several specialized Kubernetes custom resources to orchestrate the export and import of APIs between clusters. Understanding these types and their relationships is essential for effective use of kube-bind.
+The v2 slim core is three consumer-side resources in **`core.kbind.io/v1alpha1`**. It connects Kubernetes APIs using declarative objects, it is not an API request proxy.
 
-## APIServiceExportTemplate
+| Kind | Scope | Responsibility |
+| --- | --- | --- |
+| `Connection` | Cluster | Reference provider credentials, pin cluster identity, discover exported APIs, and choose schema policy. |
+| `ClusterBinding` | Cluster | Activate synchronization for listed APIs across the consumer. |
+| `Binding` | Namespace | Activate synchronization for listed namespaced APIs in this namespace. |
 
-**Purpose**: Defines a reusable template for exporting a group of related APIs and their permission requirements.
+The konnector reconciles them in the consumer. A plain Kubernetes provider needs its own API/controller, credentials and RBAC, and exported CRD labels, not these core CRDs. The optional [backend](../developers/backend/index.md) and [catalog](catalog.md) add onboarding and discovery workflows without changing this core contract.
 
-**Used by**: Service providers
-**Scope**: Cluster-scoped
-**Lifecycle**: Long-lived template definition
+See the [core API reference](../reference/crd/index.md#corekbindiov1alpha1) for field definitions. These pages describe the current, unreleased implementation, policy limitations below matter even where the API types describe a broader intent.
 
-### Key Features
+## Connection
 
-- **Resource Grouping**: Combines multiple related CRDs into a single bindable service
-- **Permission Claims**: Specifies additional resources the service needs access to
-- **Namespace Management**: Defines namespaces that should be created on the provider & consumer side
-- **Reusability**: Can be bound by multiple consumers
-
-### Structure
-
-```yaml
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceExportTemplate
-metadata:
-  name: my-service-template
-spec:
-  scope: Cluster # or Namespace
-  description: "A comprehensive service template"
-
-  # Core APIs being exported
-  resources:
-  - group: example.com
-    resource: widgets
-    versions: ["v1", "v1alpha1"]
-  - group: example.com
-    resource: gadgets
-    versions: ["v1"]
-
-  # Additional resources the service needs access to
-  permissionClaims:
-  - group: ""
-    resource: secrets
-    selector:
-      labelSelector:
-        matchLabels:
-          component: my-service
-      references:
-      - resource: widgets
-        group: example.com
-        jsonPath:
-          name: spec.secretRef.name
-          namespace: spec.secretRef.namespace
-
-  # Pre-created namespaces for this service. These will be owned by provider (service owned).
-  namespaces:
-  - name: my-service-system
-    description: "System namespace for service components"
-```
-
-### Template vs Instance
-
-- **Template**: The definition (APIServiceExportTemplate) - shared and reusable
-- **Instance**: The actual export (APIServiceExport) - created per binding
-
-## APIServiceExport
-
-**Purpose**: Represents an active, instantiated export of a specific set of CRD's and permission claims to consumer clusters.
-
-**Used by**: Automatically created by konnector agents
-**Scope**: Namespaced
-**Lifecycle**: Created when consumers bind to templates
-
-### Key Features
-
-- **Instance Management**: One APIServiceExport per contract per binding
-- **Status Tracking**: Reports synchronization status and conditions
-- **Automatic Lifecycle**: Created/updated/deleted by the konnector agent
+**Purpose**: Establish the provider link and choose schema policy. **Used by**: Service consumers. **Scope**: Cluster-scoped.
 
 ### Structure
 
 ```yaml
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceExport
+apiVersion: core.kbind.io/v1alpha1
+kind: Connection
 metadata:
-  name: widgets-export-consumer123
-  namespace: kube-bind-provider-ns
+  name: provider
 spec:
-  # The CRD being exported
-  resources:
-  - group: example.com
-    resource: widgets
-    versions: ["v1"]
-
-  # Permission claims for this specific export
-  permissionClaims:
-  - group: ""
-    resource: secrets
-    selector:
-      labelSelector:
-        matchLabels:
-          component: widget-service
-          consumer: consumer123
-
-  # How isolation is done at the provider side
-  isolation: Prefixed
-  # informerScope is the scope of the APIServiceExport. It can be either Cluster or Namespace.
-	#
-	# Cluster:    The konnector has permission to watch all namespaces at once and cluster-scoped resources.
-	#             This is more efficient than watching each namespace individually.
-	# Namespaced: The konnector has permission to watch only single namespaces.
-	#             This is more resource intensive. And it means cluster-scoped resources cannot be exported.
-  informerScope: Cluster
-
-status:
-  conditions:
-  - lastTransitionTime: "2025-11-14T12:02:29Z"
-    status: "True"
-    type: Connected
-  - lastTransitionTime: "2025-11-14T12:02:30Z"
-    status: "True"
-    type: ConsumerInSync
-  - lastTransitionTime: "2025-11-14T12:02:25Z"
-    status: "True"
-    type: ProviderInSync
-```
-
-### Relationship to Templates
-
-```
-APIServiceExportTemplate (1)
-    ↓ (consumer binding creates)
-APIServiceExportRequest (1)
-    ↓ (provider processes)
-APIServiceExport + BoundSchema (1)
-    ↕ (bidirectional sync)
-APIServiceBinding (consumer side)
-```
-
-## APIServiceExportRequest
-
-**Purpose**: Represents a consumer's request to bind to a specific service template.
-
-**Used by**: Service consumers (via CLI/UI)
-**Scope**: Namespaced (on consumer side)
-**Lifecycle**: Created during binding process, short lived until APIServiceExport is established.
-
-### Key Features
-
-- **Binding Initiation**: Starts the binding process between consumer and provider
-- **Authentication Context**: Contains OAuth2 flow details and credentials
-- **Template Reference**: Points to the specific template being requested
-- **Status Tracking**: Reports binding progress and any errors
-
-### Structure
-
-```yaml
-apiVersion: kube-bind.io/v1alpha1
-kind: APIServiceExportRequest
-metadata:
-  name: my-widget-service-binding
-  namespace: default
-spec:
-  # Consumer-specific configuration. Matches template and export specification.
-  resources:
-  - group: example.com
-    resource: widgets
-    versions: ["v1"]
-
-  permissionClaims:
-  - group: core
-    resource: configmaps
-    # Selector for claimed resources. NamedResources, LabelSelector and References - OR'ed together.
-    selector:
-    # namedResources:
-    # - name:
-    #   namespace:
-    # labelSelector:
-    #  Standard label selector syntax
-    # references:
-    # - group:
-    #   resource:
-    #   versions: []
-    #   jsonPath:
-    #    name:
-    #    namespace:
-
-
-status:
-  conditions:
-  - lastTransitionTime: "2025-11-14T12:02:25Z"
-    status: "True"
-    type: Ready
-  - lastTransitionTime: "2025-11-14T12:02:25Z"
-    status: "True"
-    type: ExportsReady
-  phase: Succeeded
-```
-
-## APIServiceBinding
-
-**Purpose**: Represents the consumer-side binding to a provider service, containing the applied CRDs and managing the resource synchronization.
-
-**Used by**: Automatically created by consumer konnector agents
-**Scope**: Namespaced (on consumer side)
-**Lifecycle**: Created when APIServiceExportRequest is processed, long-lived
-
-### Key Features
-
-- **Resource Sync**: Manages bidirectional resource synchronization with provider
-- **Connection State**: Tracks connection health and authentication status
-
-### Structure
-
-```yaml
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceBinding
-metadata:
-  name: sheriffs
-spec:
-  # Secret for connecticity to the provider cluster.
   kubeconfigSecretRef:
+    namespace: kbind
+    name: provider-kubeconfig
     key: kubeconfig
-    name: kubeconfig-xbm9b
-    namespace: kube-bind
-status:
-  # boundSchemas are provider side schema tracking object, used by this connection/binding.
-  boundSchemas:
-  - group: wildwest.dev
-    resource: sheriffs
-  # other generic statuses & conditions
-  conditions:
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: Ready
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: Connected
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: Heartbeating
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: InformersSynced
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: SchemaInSync
-  - lastTransitionTime: "2025-11-18T07:16:52Z"
-    status: "True"
-    type: SecretValid
-  # permissionClaims used by this connection/binding
-  permissionClaims:
-  - group: ""
-    resource: secrets
-    selector:
-      labelSelector:
-        matchLabels:
-          app: sheriff
-      references:
-      - group: wildwest.dev
-        jsonPath:
-          name: spec.secretRefs.#.name
-          namespace: spec.secretRefs.#.namespace
-        resource: sheriffs
-  providerPrettyName: BigCorp.com
+  schema:
+    source: CRD
+    pullPolicy: Bound
+    updatePolicy: Always
+---
+apiVersion: core.kbind.io/v1alpha1
+kind: Binding
+metadata:
+  name: widgets
+  namespace: team-a
+spec:
+  connectionRef:
+    name: provider
+  apis:
+    - name: widgets.example.org
+  conflictPolicy: Fail
 ```
 
-## BoundSchema
+Create `team-a` separately. The Connection reference has no namespace because Connections are cluster-scoped. Each `apis[].name` is `<plural>.<group>`, not a Kind, a version, or a URL.
 
-**Purpose**: Contains the actual CRD definitions and schema information for resources bound from a provider.
+The Connection can exist before its Secret, and the Binding before its Connection, controllers retry when dependencies appear. The CRD definitions themselves must already exist.
 
-**Used by**: Created alongside APIServiceExport on provider side
-**Scope**: Namespaced (on provider side)
-**Lifecycle**: Mirrors APIServiceExport lifecycle
+### Credentials and cluster identity
 
-### Key Features
+`spec.kubeconfigSecretRef` is the only credential reference in the core. It contains a required Secret namespace and name and an optional key defaulting to `kubeconfig`. The Secret may be in any namespace the konnector is authorized to read, it is not implicitly resolved in the Binding namespace.
 
-- **Schema Storage**: Contains complete CRD definitions to sync to consumers
-- **Version Management**: Handles multiple API versions and schema evolution
-- **Validation Rules**: Includes OpenAPI schemas and validation logic
-- **Resource Metadata**: Additional metadata about the exported resources
+The **reference is immutable**, but the Secret data can be updated. Keep credentials self-contained and usable in the konnector's environment. A kubeconfig that relies on your workstation's files, exec plugin, or interactive login is not automatically usable inside the stock container.
 
-### Structure
+On first successful connection, the engine records:
+
+- `status.remoteClusterUID`: provider identity.
+- `status.localClusterUID`: consumer identity.
+
+It identifies a cluster using the `core.kcp.io/v1alpha1` LogicalCluster named `cluster` when available, otherwise the `kube-system` Namespace UID. A forbidden identity read is reported rather than silently skipped. The API makes each recorded UID immutable once set.
+
+Subsequent reconciliations compare the provider identity with the pinned UID. Replacing Secret data with a kubeconfig for a different cluster produces `ClusterIdentityChanged`, it must not silently move existing objects to a new provider. Use a new Connection and a deliberate unbind/rebind workflow for a new provider identity.
+
+**Credential rotation limitation:** the Connection rereads Secret data, but an already-engaged instance-sync client is not rebuilt merely because a valid Secret changed while the Connection stayed Ready. After rotating credentials for the same provider, restart the konnector (or its deployment) and verify instance sync before revoking the old credential. The core does not renew tokens itself.
+
+The engine adds `core.kbind.io/cleanup` to the Connection and its referenced Secret. The Secret finalizer keeps credentials available during teardown, the engine does not delete the Secret for you.
+
+### Provider export boundary
+
+With the CRD source, label an API on the provider:
+
+```bash
+kubectl --context=provider label crd widgets.example.org \
+  core.kbind.io/exported=true --overwrite
+```
+
+Only the exact value `"true"` matches. Discovery normally refreshes every 30 seconds and appears in `Connection.status.exportedAPIs`.
+
+This is an opt-in discovery filter, not an RBAC mechanism. A user with CRD read permission can still read unlabelled CRDs outside kbind. The konnector also needs independent instance permissions.
+
+With OpenAPI, there is no exported-label check. The discovery/API boundary exposed by the provider credentials determines candidates, built-in Kubernetes groups are excluded. Not all discovery responses are filtered by object-level RBAC, so a discovered API is not proof that its instances can be read or written.
+
+### Schema source and policies
+
+Defaults are `source: Auto`, `pullPolicy: Bound`, `updatePolicy: Always`, and `autoBind: false`.
+
+#### Source
+
+| Source | Current behavior |
+| --- | --- |
+| `CRD` | List provider CRDs labelled `core.kbind.io/exported: "true"` and read selected CRD definitions. Recommended for an explicit opt-in on ordinary Kubernetes. |
+| `OpenAPI` | Discover non-built-in APIs and synthesize consumer CRDs using `/openapi/v3`. Useful for CRD-less providers. No CRD label gate. |
+| `Auto` | Try labelled CRD discovery first. A successful list with exports selects CRD, a successful list with no exports falls through to OpenAPI. |
+
+**Auto is not a fallback for a failed CRD list.** The current code returns list errors, including `Forbidden`, instead of falling back. Choose `OpenAPI` explicitly when CRDs cannot be listed. Conversely, use `CRD` explicitly when an empty label selection should export nothing: Auto can otherwise discover unlabelled APIs through OpenAPI.
+
+Inspect `status.activeSchemaSource` rather than assuming which source Auto selected.
+
+#### Which schemas are installed?
+
+| `pullPolicy` | Effect |
+| --- | --- |
+| `Bound` | Install only APIs named by a Binding or ClusterBinding. |
+| `All` | Install all discovered exported APIs, even without bindings. |
+| `None` | Do not create missing consumer CRDs, an external manager supplies them. |
+
+Installing a schema does not activate instance sync. A Binding/ClusterBinding is still required unless `autoBind` supplies one.
+
+With `None` and the **CRD** source, the engine still reads the provider CRD and stamps existing consumer CRDs with its managed and Connection markers. With the **OpenAPI** source, existing CRDs are only read: you must supply the markers yourself for the sync controller to discover them:
 
 ```yaml
-apiVersion: kube-bind.io/v1alpha2
-kind: BoundSchema
 metadata:
-  name: widgets-schema-consumer123
-  namespace: kube-bind-provider-ns
-  ownerReferences:
-  - apiVersion: kube-bind.io/v1alpha2
-    kind: APIServiceExport
-    name: widgets-export-consumer123
-spec:
-  group: wildwest.dev
-  informerScope: Cluster
-  names:
-    kind: Sheriff
-    listKind: SheriffList
-    plural: sheriffs
-    singular: sheriff
-  scope: Cluster
-  versions:
-  - name: v1alpha1
-    schema:
-     # Complete OpenAPI schema definition
-    served: true
-    storage: true
-    subresources:
-      status: {}
-          # Complete OpenAPI schema definition
-
-status:
-  acceptedNames:
-    kind: Sheriff
-    listKind: SheriffList
-    plural: sheriffs
-    singular: sheriff
-  conditions:
-  - lastTransitionTime: "2025-11-14T12:02:34Z"
-    status: "True"
-    type: Ready
-  - lastTransitionTime: "2025-11-14T12:02:34Z"
-    message: the initial names have been accepted
-    reason: InitialNamesAccepted
-    status: "True"
-    type: Established
-  - lastTransitionTime: "2025-11-14T12:02:29Z"
-    message: no conflicts found
-    reason: NoConflicts
-    status: "True"
-    type: NamesAccepted
+  labels:
+    core.kbind.io/managed: "true"
+  annotations:
+    core.kbind.io/connection: provider
 ```
 
-## APIServiceNamespace
+`None` does **not** protect a manually supplied CRD against ClusterBinding cleanup. See [GitOps](gitops.md) before sharing CRD ownership.
 
-**Purpose**: Manages namespace mapping and isolation between provider and consumer clusters.
+#### Schema updates and fidelity
 
-**Used by**: Automatically managed by konnector agents
-**Scope**: Namespaced (on provider side)
-**Lifecycle**: Created as needed during resource synchronization or by provider, when namespace is desired on consumer side.
+`updatePolicy: Always` follows provider CRD spec changes for the CRD source. `Once` prevents subsequent spec updates. Neither is a compatibility check or a storage migration strategy.
 
-### Key Features
+Current limitations:
 
-- **Namespace Isolation**: Ensures consumer resources don't conflict
-- **Mapping Logic**: Handles namespace translation between clusters
-- **Resource Organization**: Groups related resources per consumer
-- **Automatic Management**: Created/deleted as bindings change
+- A CRD-source pull keeps **one version**: the provider storage version, or the first served version if no storage version is found. It serves that version locally and forces conversion to `None`, removing the conversion webhook configuration.
+- Validation, defaults, and subresources present in that selected CRD version can be retained, but provider admission webhooks and controllers are not installed. Local acceptance does not guarantee provider acceptance.
+- OpenAPI synthesis can expose multiple discovered versions, with the discovery-preferred version selected for storage. It installs no conversion webhook, this does not reproduce provider-side multi-version conversion.
+- OpenAPI `$ref` schemas are replaced with permissive object schemas preserving unknown fields, not fully resolved. CEL/defaulting fidelity and provider admission behavior are not guaranteed. Short names, printer columns, and scale subresources are not reconstructed, discovered status subresources are.
+- With **OpenAPI + Bound**, the binding only synthesizes when the consumer CRD is absent. `Always` currently does not refresh an existing bound-only OpenAPI CRD. The `All` path does reconcile synthesized schemas repeatedly.
+- `Once` does not stamp an arbitrary existing CRD into management. Use an intentional externally managed workflow rather than assuming any preinstalled schema is adopted.
+
+Review consumer CRDs and run representative API validation/sync tests before exposing a provider API to applications. The provider remains authoritative for execution and admission.
+
+## ClusterBinding and Binding
+
+**Purpose**: Activate synchronization for the selected APIs. **Used by**: Service consumers. **Scope**: Cluster-wide (`ClusterBinding`) or one namespace (`Binding`).
+
+### Namespace selection and overlapping bindings
+
+A ClusterBinding covers all namespaces for a namespaced API, or the entire API for a cluster-scoped resource. A Binding covers only its own namespace and cannot activate cluster-scoped instance sync. There is no namespace label selector, namespace allowlist field, per-instance selector, or runtime rename/scope-conversion policy in the core.
+
+The stock mapper preserves namespace and name. `team-a/my-widget` on the consumer becomes `team-a/my-widget` on the provider. A provider kubeconfig's default namespace controls the heartbeat location, **not** this mapping.
+
+The CRD remains cluster-scoped even when a Binding is namespaced. Users in other namespaces can see/use that API if their local RBAC permits it, but their instances do not sync without a covering binding. Informers still read cluster-wide.
+
+Avoid overlapping bindings for an API. The resolver checks ClusterBindings before namespaced Bindings, including when the ClusterBinding is not Ready. It returns the first match at a given scope, there is no supported priority or merge policy among peers. A managed consumer CRD pins one Connection for its syncer, so binding the same API to different providers is not supported routing.
+
+### Automatic binding
+
+`spec.autoBind: true` makes the engine maintain a ClusterBinding **named after the Connection**, listing every exported API and owned by that Connection. Newly discovered exports can therefore start syncing without another user action. Reserve that name, do not also manage it as an independent GitOps object.
+
+When there are no exports, the reconciler deletes that ClusterBinding. Changing `autoBind` to `false` stops maintaining it but currently does **not** remove an already-created binding. Delete that binding deliberately if the goal is to stop syncing.
+
+## Export, Collection, and Grant
+
+The optional service layer uses `Export` to describe an offering, `Collection` to group offerings, and `Grant` to record issued credentials. They are cluster-scoped resources on the provider, in the `catalog.kbind.io` and `iam.kbind.io` groups. See [Catalog and Grants](catalog.md) for their structures.
 
 ## Complete Binding Flow
 
-The correct flow from template to active binding:
+1. **Provider definition**: expose service APIs and credential RBAC, optionally with a catalog Export.
+2. **Consumer request**: bind an Export through the optional CLI/backend, or prepare core manifests directly.
+3. **Provider processing**: the optional issuer provisions a Grant's credentials.
+4. **Consumer binding**: apply the Secret, Connection, and bindings with the konnector installed.
+5. **Bidirectional sync**: consumer spec flows up and provider status flows down.
 
-### 1. Template Definition (Provider)
-```yaml
-APIServiceExportTemplate → defines service contract
-```
+### Observing progress
 
-### 2. Consumer Request
-```yaml
-APIServiceExportRequest → consumer requests binding
-```
+Connection status reports identities, active schema source, exports, and conditions such as `SecretValid`, `Connected`, `PermissionDenied`, and `Ready`. Although `SchemaInSync` is defined in the API, the current Connection reconciler does not populate it.
 
-### 3. Provider Processing
-```yaml
-APIServiceExport + BoundSchema → provider creates export with schema
-```
-
-### 4. Consumer Binding
-```yaml
-APIServiceBinding → consumer applies CRDs and establishes sync
-```
-
-### 5. Bidirectional Sync
-```yaml
-Provider Resources ↔ Consumer Resources (via konnector agents)
-```
-
-### Structure
-
-```yaml
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceNamespace
-metadata:
-  # name presents namespace on consumer side
-  name: wild-west
-  # provider namespace, 1:1 mapped to consumer
-  namespace: kube-bind-t5gf9
-  ownerReferences:
-  - apiVersion: kube-bind.io/v1alpha2
-    blockOwnerDeletion: true
-    controller: true
-    kind: APIServiceExport
-    name: sheriffs
-    uid: fbd6c04e-e134-4156-89f4-4b31fea16657
-spec: {}
-status:
-  # namespace, assigned on provider cluster
-  namespace: kube-bind-t5gf9-wild-west
-```
-
-### Namespace Isolation Modes
-
-kube-bind supports different isolation strategies:
-
-- **Prefixed**: Consumer namespace becomes `{consumer-id}-{original-name}`
-- **Namespaced**: Consumer resources go into dedicated provider namespaces
-- **None**: For dedicated provider clusters where isolation isn't needed
-
-## API Relationships and Data Flow
-
-```
-┌─────────────────────────────────────┐ Provider Cluster
-│                                     │
-│  APIServiceExportTemplate           │
-│         │                           │
-│         ▼ (processes request)       │
-│  APIServiceExport ──► APIServiceNamespace
-│         +                   │       │
-│  BoundSchema                │       │
-│         │                   │       │
-│         ▼ (schema sync)     │       │
-└─────────┼───────────────────┼───────┘
-          │                   │
-     [Secure Connection]      │
-          │                   │
-┌─────────▼───────────────────▼───────┐ Consumer Cluster
-│                                     │
-│  APIServiceExportRequest            │
-│         │                           │
-│         ▼ (creates binding)         │
-│  APIServiceBinding ◄─── Applied CRDs│
-│         │                   │       │
-│         ▼                   │       │
-│  Available APIs             │       │
-│         │                   │       │
-│         ▼ (resource sync)   │       │
-│  Synchronized Resources ────┘       │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-## Permission Claims Deep Dive
-
-Permission claims are a critical concept that determines what additional resources a service can access beyond its own CRDs.
-
-### Claim Types
-
-#### Label Selector Claims
-Select resources based on labels:
-```yaml
-permissionClaims:
-- group: ""
-  resource: secrets
-  selector:
-    labelSelector:
-      matchLabels:
-        component: my-service
-        environment: production
-```
-
-#### Named Resource Claims
-Select specific resources by name:
-```yaml
-permissionClaims:
-- group: ""
-  resource: configmaps
-  selector:
-    namedResources:
-    - name: service-config
-      namespace: kube-system
-    - name: feature-flags
-      namespace: default
-```
-
-#### Reference Claims (Dynamic)
-Select resources based on references from other objects:
-```yaml
-permissionClaims:
-- group: ""
-  resource: secrets
-  selector:
-    references:
-    - resource: widgets
-      group: example.com
-      jsonPath:
-        name: spec.secretRef.name
-        namespace: spec.secretRef.namespace
-```
-
-### Claim Evaluation
-
-Permission claims are evaluated when:
-
-1. **Template binding occurs** - Initial claim evaluation
-
-2. **Reference sources change** - Dynamic re-evaluation for reference claims
-
-3. **Resource labels change** - Re-evaluation for label selector claims
+Binding status reports `boundAPIs`, schema hashes, conflict counts, and conditions including `Ready`, `Synced`, `Conflicts`, and `PermissionDenied`. `Synced=True` is a setup-level result, not a per-object delivery acknowledgement. Conflicting objects can coexist with a ready binding, some instance RBAC errors appear only as Events/logs.
 
 ## Related Documentation
 
-- [CRD Reference](../../reference/crd/kube-bind.io/) - Complete API specifications
-- [CLI Reference](../../reference/) - Command-line tool documentation
+Use [Synchronization](synchronization.md) for the data path and lifecycle, and [Troubleshooting](troubleshooting.md) to inspect actual object delivery.

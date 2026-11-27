@@ -4,3 +4,9 @@ Welcome to the kube-bind developer documentation! This section contains informat
 
 ## Developer Guide
 
+- [Architecture](architecture.md)
+- [Development environments](dev-environment/index.md)
+- [Backend](backend/index.md)
+- [Konnector](konnector/index.md)
+- [Publishing a release](publishing-a-release.md)
+- [Testing changes](testing-changes.md)

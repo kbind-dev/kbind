@@ -4,12 +4,12 @@ kbind is built and maintained by an open community. We welcome new contributors,
 
 ## Communication channels
 
-- **Slack:** [`#kube-bind`](https://kubernetes.slack.com/archives/C046PRXNJ4W) in the [Kubernetes Slack workspace](https://slack.k8s.io).
+- **Slack:** [`#kbind-dev`](https://kubernetes.slack.com/archives/C046PRXNJ4W) in the [Kubernetes Slack workspace](https://slack.k8s.io).
 - **Mailing list:** [kube-bind-dev](https://groups.google.com/g/kube-bind-dev) for development discussions and meeting invites.
 
 ## Community meetings
 
-We hold bi-weekly community meetings — every second Thursday at 11am EST (5pm CET). The meetings are open to everyone.
+We hold bi-weekly community meetings, every second Thursday at 11am EST (5pm CET). The meetings are open to everyone.
 
 - **Get the invite:** join the [kube-bind-dev mailing list](https://groups.google.com/g/kube-bind-dev).
 - **Agenda and notes:** the shared [community meeting notes document](https://docs.google.com/document/d/1qztpKOmdZu5iWq_4N9n3AZpcAPuPhBiGNbje5GPg0iM) holds upcoming and past agendas. Please add your name and topic before the call.

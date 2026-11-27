@@ -1,50 +1,25 @@
 # API Binding
 
-## Overview
+v2 binding terminates in ordinary consumer-side Kubernetes objects rather than request/response CRDs.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant consumer-cluster as Consumer cluster
-    participant client as Client
-    participant provider-cluster as Provider cluster
-    participant provider-backend as Provider backend
+## Request
 
+An authenticated caller posts an Export name to `POST /api/bind`:
 
-    %% Create APIServiceExportRequest
-    client->>provider-cluster: Create "APIServiceExportRequest"
-
-    par Provider
-      provider-backend->>provider-cluster: Get "APIServiceExportRequest"
-      loop For each "APIServiceExportRequest.spec.resources"
-        provider-backend->>provider-cluster: Create "APIServiceExport"
-      end
-      provider-backend->>provider-cluster: Set "APIServiceExportRequest.status.phase"
-    and Client
-      loop Every 1 second for 10 minutes
-      client->>provider-cluster: Get "APIServiceExportRequest"
-      client->>client: Verify "APIServiceExportRequest"<br/>(.status.phase == Succeeded)"
-      end
-    end
-
-    %% Create APIServiceBindings
-    loop For each "APIServiceExportRequest.spec.resources"
-    client->>consumer-cluster: Create "APIServiceBinding"
-    end
+```json
+{"export":"widgets"}
 ```
 
-## Contracts
+The gateway requires a ready Export, creates or updates the caller's Grant, and waits for the issuer to provision credentials. The response contains `grant`, `pickupURL`, and `expiresAt`.
 
-**APIServiceExportRequest**
+## Pickup and apply
 
-In case the _APIServiceExportRequest_ is accepted, the provider backend **must** ensure that
+`GET /api/bundle/{token}` consumes the pickup ticket once and returns a kubeconfig Secret, Connection, and ClusterBinding. The ticket defaults to a five-minute lifetime, the issued credentials remain usable until revoked.
 
-* for each `APIServiceExportRequest.spec.resources` an `APIServiceExport` is created
-* each `APIServiceExport` is created in the namespace of the `APIServiceExportRequest`
-* each `APIServiceExport` is created with a name following the pattern `resource.resource + "." + resource.group`
-* the `APIServiceExportRequest.status.phase` is set to `Succeeded`
+The bundle does not include the konnector or core CRDs. Install those first, then apply the bundle using the CLI, kubectl, or an existing GitOps workflow.
 
-In case the _APIServiceExportRequest_ is declined, the provider backend **must** ensure that
+## Revocation
 
-* the `APIServiceExportRequest.status.terminalMessage` is set to a human readable message describing the reason
-* the `APIServiceExportRequest.status.phase` is set to `Failed`
+Deleting the provider Grant asks the issuer to remove its credentials. This does not remove the consumer's core objects or automatically delete synced provider instances. For normal teardown, unbind while credentials still work.
+
+See [catalog and issuance](../../../usage/catalog.md) for the lifecycle and the [HTTP reference](index.md) for status codes, authentication, and pickup semantics.

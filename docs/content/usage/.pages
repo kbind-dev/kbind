@@ -2,4 +2,8 @@ nav:
     - index.md
     - api-concepts.md
     - synchronization.md
+    - catalog.md
+    - gitops.md
     - integrations
+    - migration.md
+    - troubleshooting.md

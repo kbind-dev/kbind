@@ -5,13 +5,14 @@ weight: 30
 
 # OIDC Authentication
 
-The kube-bind backend supports OpenID Connect (OIDC) authentication for securing API access. There are two modes of operation: external OIDC providers and an embedded OIDC provider for development.
+The kbind backend supports OpenID Connect (OIDC) authentication for securing API access. There are two modes of operation: external OIDC providers and an embedded OIDC provider for development.
 
 ## External OIDC Provider (Production)
 
 For production deployments, use an external OIDC provider such as:
+
 - Dex
-- Keycloak 
+- Keycloak
 - Auth0
 - Google
 - Microsoft Azure AD
@@ -19,131 +20,75 @@ For production deployments, use an external OIDC provider such as:
 
 ### Configuration
 
-Configure the backend to use an external OIDC provider with these flags:
+Configure the backend using the v2 flags:
 
 ```bash
---oidc-type=external
---oidc-issuer-url=https://your-oidc-provider.com
---oidc-issuer-client-id=your-client-id
---oidc-issuer-client-secret=your-client-secret
---oidc-callback-url=https://your-backend.com/callback
---oidc-authorize-url=https://your-oidc-provider.com/auth
---oidc-ca-file=/path/to/ca-bundle.pem  # Optional: for custom CA certificates
---oidc-allowed-groups=group1,group2,group3  # Optional: restrict access to specific groups
---oidc-allowed-users=user1,user2,user3      # Optional: restrict access to specific users
+./bin/backend \
+  --external-url=https://bind.example.com \
+  --oidc-issuer-url=https://your-oidc-provider.com \
+  --oidc-client-id=your-client-id \
+  --oidc-client-secret="$OIDC_CLIENT_SECRET" \
+  --oidc-redirect-url=https://bind.example.com/api/auth/oidc/callback
 ```
 
-**Note**: When using external OIDC providers, at least one of `--oidc-allowed-groups` or `--oidc-allowed-users` must be specified for security reasons.
+Register the exact callback with your issuer. Use `--oidc-ca-file` for a private CA, `--oidc-username-claim` for the stable identity claim (default `sub`), and `--oidc-groups-claim` if groups should be recorded.
 
 ### External OIDC Flow
 
-1. User initiates authentication by accessing a protected endpoint
-2. Backend redirects user to the external OIDC provider's authorization endpoint
-3. User authenticates with the OIDC provider
-4. OIDC provider redirects back to the backend's callback URL with authorization code
-5. Backend exchanges authorization code for ID token and access token
-6. Backend validates the tokens and establishes user session
-7. User can now access protected APIs with valid session
+1. User initiates authentication by accessing the gateway login page.
+2. Backend redirects to the OIDC authorization endpoint with state, nonce, and PKCE.
+3. User authenticates with the OIDC provider.
+4. Provider redirects to the backend callback with an authorization code.
+5. Backend exchanges the code, verifies the ID token, and issues a signed, encrypted session.
+6. User accesses protected APIs using the session cookie or token.
 
 ## Embedded OIDC Provider (Development Only)
 
-For development and testing purposes, kube-bind includes an embedded OIDC provider that eliminates the need to set up an external authentication service.
-
-### Configuration
-
-Configure the backend to use the embedded OIDC provider:
+For development and testing, kbind includes an embedded provider that avoids setting up an external authentication service:
 
 ```bash
---oidc-type=embedded
---oidc-callback-url=https://your-backend.com/callback
---oidc-issuer-url=https://your-backend.com  # The backend serves as the OIDC provider
---oidc-allowed-groups=group1,group2,group3  # Optional: restrict access to specific groups
---oidc-allowed-users=user1,user2,user3      # Optional: restrict access to specific users
+./bin/backend --oidc-mock --external-url=http://localhost:8080
 ```
 
 ### Embedded OIDC Flow
 
-1. Backend starts up and initializes the embedded OIDC server using mockoidc
-2. The embedded OIDC server automatically generates:
-   - Client ID and client secret
-   - Signing keys for tokens
-   - OIDC discovery endpoints (`/.well-known/openid_configuration`)
-3. User initiates authentication by accessing a protected endpoint
-4. Backend redirects user to its own embedded OIDC authorization endpoint
-5. User authenticates with the embedded provider (typically accepts any credentials for development)
-6. Embedded OIDC provider redirects back to the backend's callback URL
-7. Backend validates the tokens (self-issued) and establishes user session
-8. User can now access protected APIs with valid session
+1. Backend initializes the mock OIDC issuer and its client credentials.
+2. User starts login through the gateway.
+3. The mock issuer auto-approves the fixed development identity.
+4. Backend completes the same callback and session flow.
 
-### Development Mode Warning
-
-When using embedded OIDC, the backend displays a prominent warning message at startup to remind developers that this mode is not suitable for production use.
+The mock issuer uses a separate port. With port forwarding, expose that port as well as the gateway, see [Backend setup](../index.md#development-run-against-a-provider).
 
 ## Security Considerations
 
 ### External OIDC (Production)
-- Use HTTPS for all endpoints
-- Validate OIDC provider certificates
-- Use strong client secrets
-- Configure proper redirect URI restrictions
-- Monitor for security updates to the OIDC provider
+
+- Use HTTPS for all endpoints and validate provider certificates.
+- Use strong client secrets and exact redirect URI restrictions.
+- Share both signing and encryption keys across gateway replicas.
+- Configure the TLS proxy to add `Secure` to session and login-state cookies: the HTTP backend does not infer it from `externalURL` or forwarded headers.
+- Monitor for security updates to the OIDC provider.
 
 ### Embedded OIDC (Development Only)
-- **NEVER use in production** - provides no real security
-- Accepts any credentials for authentication
-- Intended only for local development and testing
-- Does not persist user data between restarts
+
+- **Never use in production**: every login is auto-approved.
+- It is intended only for isolated local development and testing.
+- It does not model distinct users or production authorization.
 
 ## Access Control
 
-The kube-bind backend provides fine-grained access control through OIDC group and user-based authorization. When a user successfully authenticates via OIDC, the backend automatically creates RBAC resources to control access to cluster binding operations.
+v2 does not have `--oidc-allowed-groups` or `--oidc-allowed-users`. OIDC groups are identity metadata, not per-Export authorization. All authenticated gateway callers can bind ready Exports and read the provider's inventories. Control access to the gateway accordingly, do not assume the old group-based binding policy is still enforced.
 
-### Access Control Flags
-
-- `--oidc-allowed-groups`: List of OIDC groups allowed to access bindings inside the cluster. Users must be members of at least one of these groups to gain access.
-- `--oidc-allowed-users`: List of specific OIDC users allowed to access bindings inside the cluster.
-
-**Important**: For external OIDC providers, at least one of these flags must be specified. This validation ensures that access control is properly configured in production environments.
-
-### How Access Control Works
-
-1. **RBAC Resource Creation**: For each cluster, the controller automatically creates:
-   - A `ClusterRole` named `kube-bind-oidc-user` with permissions to perform binding operations
-   - A `ClusterRoleBinding` that binds the role to the specified groups and users
-
-2. **Group-based Access**: Users who are members of groups listed in `--oidc-allowed-groups` are granted access via RBAC subject entries of kind `Group`.
-
-3. **User-based Access**: Individual users listed in `--oidc-allowed-users` are granted access via RBAC subject entries of kind `User`.
-
-4. **Embedded OIDC Special Behavior**: When using embedded OIDC (`--oidc-type=embedded`), the `system:authenticated` group is automatically added to the allowed groups list, providing access to all authenticated users during development.
-
-### Example Configuration
-
-```bash
-# Restrict access to specific groups and users
---oidc-allowed-groups=kube-bind-admins,platform-team
---oidc-allowed-users=admin@example.com,operator@example.com
-```
-
-This configuration would create RBAC bindings allowing:
-- All members of the `kube-bind-admins` group
-- All members of the `platform-team` group  
-- The specific users `admin@example.com` and `operator@example.com`
+Provider-cluster bearer tokens can additionally be authenticated using `--kubernetes-auth` and TokenReview. This does not replace gateway OIDC login configuration. See [authentication conventions](../http/index.md#authentication-conventions).
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Certificate validation failures**: Use `--oidc-ca-file` to specify custom CA certificates
-2. **Callback URL mismatches**: Ensure the callback URL matches what's configured in your OIDC provider
-3. **Token validation errors**: Check that the issuer URL matches between provider and backend configuration
-4. **Network connectivity**: Verify the backend can reach the external OIDC provider
-5. **Access control validation errors**: When using external OIDC, ensure at least one of `--oidc-allowed-groups` or `--oidc-allowed-users` is specified
+1. **Certificate validation failures**: configure `--oidc-ca-file` with the issuer's trusted CA.
+2. **Callback URL mismatches**: register `/api/auth/oidc/callback` at the public gateway URL.
+3. **Token validation errors**: confirm the issuer URL and configured username claim.
+4. **Network connectivity**: verify both browser and backend can reach the issuer.
+5. **Sessions lost across replicas/restarts**: configure both shared session keys.
 
-### Debug Logging
-
-Enable debug logging to troubleshoot OIDC issues:
-
-```bash
---v=2  # Increase verbosity for more detailed logs
-```
+See the [backend reference](../http/index.md) for complete flags and cookie lifetimes.

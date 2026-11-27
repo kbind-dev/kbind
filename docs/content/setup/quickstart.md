@@ -1,6 +1,6 @@
 ---
 description: >
-  Get started with kube bind.
+  Get started with kbind.
 ---
 
 # Quickstart
@@ -8,110 +8,94 @@ description: >
 ## Prerequisites
 
 - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
-- [kube-bind CLI](kubectl-plugin.md) installed
+- For the backend walkthrough: [kubectl bind plugin](kubectl-plugin.md) installed
 
-## Start with kube-bind
+To try synchronization without a backend or login, follow the
+[core-only GitOps example](../usage/gitops.md#try-the-core-without-a-backend).
+
+## Start with kbind
 
 ### Quick Development Setup
 
-**Note:** This setup requires Docker as it uses advanced network configuration to minimize external DNS dependencies and enable inter-cluster connectivity.
-
-For a quick development environment with local Kind clusters, use the `kubectl bind dev` command:
-
-```bash
-kubectl bind dev create
-```
-
-Example output:
-```bash
-kube-bind Development Environment Setup
-
-EXPERIMENTAL: kube-bind dev command is in preview
-Requirements: Docker must be installed and running
-
-Host entry exists for kube-bind.dev.local
-✓ Host entry exists for kube-bind.dev.local
-Kind cluster kind-provider already exists, skipping creation
-Wrote kubeconfig kind-provider.kubeconfig
-Helm chart installed successfully
-Creating kind cluster kind-consumer with network kube-bind-dev
-Kind cluster kind-consumer created
-Wrote kubeconfig kind-consumer.kubeconfig
-kube-bind dev environment is ready!
-
-Configuration:
-• Provider cluster kubeconfig: kind-provider.kubeconfig
-• Consumer cluster kubeconfig: kind-consumer.kubeconfig
-• kube-bind server URL: http://kube-bind.dev.local:8080
-
-Next Steps:
-
-1. Login to authenticate to the provider cluster:
-kubectl bind login http://kube-bind.dev.local:8080
-
-2. Bind an API service from provider to consumer:
-KUBECONFIG=kind-consumer.kubeconfig kubectl bind --konnector-host-alias 192.168.155.2:kube-bind.dev.local
-```
-
-
-This command will:
-
-- Create two Kind clusters: `kind-provider` (API provider) and `kind-consumer` (API consumer)
-- Deploy the kube-bind backend to the provider cluster
-- Generate kubeconfig files for both clusters
-- Set up local DNS entries for `kube-bind.dev.local`
-- Start the kube-bind server at `http://kube-bind.dev.local:8080`
+For a local development environment, follow the [kind setup guide](../developers/dev-environment/kind.md). It creates a provider cluster and a consumer cluster, starts the backend and konnector, and adds the Widget API to the catalog. Docker, kind, and Go are required.
 
 After the development environment is ready, you can:
 
 1. **Authenticate to the provider cluster:**
-   ```bash
-   kubectl bind login http://kube-bind.dev.local:8080
-   ```
-   This will open a browser for authentication and save the configuration.
 
-2. **Bind API services from provider to consumer:**
+    ```bash
+    kubectl bind login http://localhost:8080
+    ```
 
-   Bind using CLI (step 2) in the output.
+    This opens a browser for authentication and saves the session.
 
-   ```bash
-   KUBECONFIG=kind-consumer.kubeconfig kubectl bind --konnector-host-alias <docker-internal-ip-address>:kube-bind.dev.local
-   ```
-   This opens the kube-bind web UI where you can select and bind API services.
+2. **Bind an API service from provider to consumer:**
+
+    ```bash
+    kubectl bind catalog
+    kubectl bind export widgets --kubeconfig=consumer.kubeconfig \
+      --install-konnector=false
+    ```
+
+    The development setup already runs the konnector, so skip installing another copy. You can also browse the catalog at `http://localhost:8080`.
 
 3. **Verify bound resources:**
-   ```bash
-   KUBECONFIG=kind-consumer.kubeconfig kubectl get crd
-   KUBECONFIG=kind-consumer.kubeconfig kubectl get apiservicebindings -n kube-bind
-   ```
 
-4. **Create example resource**
-   ```bash
-   kubectl bind dev example | KUBECONFIG=kind-consumer.kubeconfig kubectl create -f -
-   ```
+    ```bash
+    export KUBECONFIG="$PWD/consumer.kubeconfig"
+    kubectl get connections,clusterbindings
+    kubectl wait --for=condition=Established crd/widgets.example.org --timeout=120s
+    ```
 
-5. **Check resource synced to provider**
-   ```bash
-   KUBECONFIG=kind-provider.kubeconfig kubectl get mangodbs.mangodb.com -A
-   ```
+4. **Create an example resource:**
+
+    ```bash
+    kubectl apply -f - <<'EOF'
+    apiVersion: example.org/v1
+    kind: Widget
+    metadata:
+      name: my-widget
+      namespace: default
+    spec:
+      size: large
+    EOF
+    ```
+
+5. **Check the resource synced to the provider:**
+
+    ```bash
+    kubectl --kubeconfig=provider.kubeconfig -n default \
+      wait --for=create widget/my-widget --timeout=120s
+    kubectl --kubeconfig=provider.kubeconfig -n default get widgets
+    ```
+
+6. **Verify status returns to the consumer:**
+
+    The sample has no Widget service controller. Simulate its status update on the
+    provider, then wait for the consumer to receive it:
+
+    ```bash
+    kubectl --kubeconfig=provider.kubeconfig -n default \
+      patch widget my-widget --subresource=status --type=merge \
+      -p '{"status":{"phase":"Running"}}'
+    kubectl --kubeconfig=consumer.kubeconfig -n default \
+      wait --for=jsonpath='{.status.phase}'=Running widget/my-widget --timeout=120s
+    ```
+
+For other service APIs, see the [integration examples](../usage/integrations/index.md). When finished, follow the development guide's [cleanup](../developers/dev-environment/kind.md#cleanup).
 
 ### Production Deployment
 
-For production deployments, you can deploy a kube-bind backend using helm:
+For an in-cluster deployment, use the [Helm charts](helm.md) to install the consumer konnector and optional provider backend.
 
-- **[Using Helm Chart](helm.md)** - Recommended for production deployments
+Once you have a backend running, either locally or in a cluster, you can connect to it:
 
-Once you have a kube-bind backend running (either development or production), you can connect to it:
-
-### Connect to kube-bind Server
+### Connect to kbind Server
 
 ```bash
 kubectl bind login https://my-kube-bind-server.example.com
-``` 
-
-### Open kube-bind Web UI and bind services
-
-```bash
-kubectl bind
 ```
 
+### Open kbind Web UI and bind services
+
+Open your provider's URL in a browser to browse the catalog and bind services. For the same workflow from the CLI, use `kubectl bind catalog` and `kubectl bind export <name>`.

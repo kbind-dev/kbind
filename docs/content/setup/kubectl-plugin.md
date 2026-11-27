@@ -1,70 +1,66 @@
 ---
 description: >
-  How to install and use the kubectl bind plugin.
+  Install and use the kubectl bind plugin.
 ---
 
 # kubectl bind Plugin
 
-The `kubectl bind` plugin is the primary command-line interface for interacting with kube-bind services. It provides both interactive web UI access and command-line binding capabilities for connecting to remote service providers.
+The `kubectl bind` plugin is the command-line interface for interacting with kbind services. It connects to remote service providers, browses their catalogs, and binds APIs into your cluster.
 
 ## Installation
 
 === "Krew"
 
-    Install the plugin using [krew](https://krew.sigs.k8s.io/):
-
-    ```bash
-    kubectl krew index add bind https://github.com/kube-bind/krew-index.git
-    kubectl krew install bind/bind
-    ```
+    [Krew](https://krew.sigs.k8s.io/) installs released versions of the plugin, not this unreleased v2 preview. Use **Manual Build** for this preview rather than installing a 0.x release.
 
 === "Manual Build"
 
-    Build and install from source:
+    Build and install from source using the Go version declared in `go.mod`:
 
     ```bash
-    git clone https://github.com/kube-bind/kube-bind.git
-    cd kube-bind
-    make build
-    cp bin/kubectl-bind /usr/local/bin/
+    git clone --branch v2-next https://github.com/kbind-dev/kbind.git
+    cd kbind
+    make bind
+    mkdir -p "$HOME/.local/bin"
+    install -m 0755 bin/bind "$HOME/.local/bin/kubectl-bind"
+    export PATH="$HOME/.local/bin:$PATH"
+    kubectl bind --help
     ```
+
+    Keep `$HOME/.local/bin` on your shell's `PATH`. Installing the build output as `kubectl-bind` makes it available as `kubectl bind`.
 
 === "Binary Download"
 
-    Download pre-built binaries from the [releases page](https://github.com/kube-bind/kube-bind/releases):
+    Published CLI archives are available on the [releases page](https://github.com/kbind-dev/kbind/releases). Choose a v2 release explicitly, not the latest 0.x release. For this unreleased branch, use **Manual Build**.
+
+    After extracting an archive for your operating system and architecture, install its `kubectl-bind` binary:
 
     ```bash
-    # Download and install for Linux/macOS
-    OS=$(uname | tr '[:upper:]' '[:lower:]')
-    ARCH=$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-    VERSION=$(curl -s https://api.github.com/repos/kube-bind/kube-bind/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-    curl -LO https://github.com/kube-bind/kube-bind/releases/download/${VERSION}/kubectl-bind_${VERSION#v}_${OS}_${ARCH}.tar.gz
-    tar -xzf kubectl-bind_${VERSION#v}_${OS}_${ARCH}.tar.gz
-    sudo mv bin/kubectl-bind /usr/local/bin/kubectl-bind
+    mkdir -p "$HOME/.local/bin"
+    install -m 0755 kubectl-bind "$HOME/.local/bin/kubectl-bind"
+    export PATH="$HOME/.local/bin:$PATH"
     ```
 
 ## Basic Usage
 
-The main plugin command is `kubectl bind` which opens the kube-bind web UI in your browser for interactive service binding.
+With the [v2 konnector installed](helm.md) in your consumer cluster:
 
 ```bash
-# Login to a kube-bind server first
 kubectl bind login https://my-kube-bind-server.example.com
-
-# Open kube-bind UI for current server context
-kubectl bind
+kubectl bind catalog
+kubectl bind export widgets --kubeconfig=./consumer.kubeconfig --install-konnector=false
+kubectl --kubeconfig=./consumer.kubeconfig get connections,clusterbindings
 ```
 
-The plugin provides several subcommands including `login`, `templates`, `collections`, and `apiservice` for different binding workflows.
+Replace `widgets` with an Export from the catalog. To use the Web UI, open the provider URL in your browser. In v2, binding uses `export <name>` rather than bare `kubectl bind`.
 
-For complete command reference and examples, see the [CLI Reference](../reference/index.md).
+See the [CLI reference](../reference/cli/index.md) for all commands and the [catalog guide](../usage/catalog.md) for sessions, credentials, and bundle handling.
 
 ## Quick Start
 
-1. Install the plugin using Krew or build from source
-2. Login to your kube-bind server: `kubectl bind login <server-url>`
-3. Open the web UI: `kubectl bind`
-4. Browse and bind to available services through the interface
+1. Build and install the v2 plugin using **Manual Build**.
+2. Install the consumer konnector using the [Helm guide](helm.md).
+3. Log in to your provider with `kubectl bind login <server-url>`.
+4. Browse with `kubectl bind catalog` and bind an Export with `kubectl bind export <name>`.
 
-For detailed setup instructions, see the [Quickstart Guide](./quickstart.md).
-
+For a local example, follow the [Quickstart Guide](quickstart.md).

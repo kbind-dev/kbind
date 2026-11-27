@@ -9,7 +9,10 @@ authors:
 
 # Deep Dive: Understanding kube-bind Internals
 
-> **Note:** Just want to get started quickly? Check out our [Quick Start Guide](2026-02-14-kube-bind-quickstart.md) which sets up everything automatically with `kubectl bind dev create`. This article explains the machinery under the hood—the "Hard Way".
+!!! note "Historical 0.x article"
+    This article is preserved from the 0.x documentation. Its commands and API names are not v2 instructions, use the [v2 quickstart](../../setup/quickstart.md).
+
+> **Note:** Just want to get started quickly? Check out our [Quick Start Guide](2026-02-14-kube-bind-quickstart.md) which sets up everything automatically with `kubectl bind dev create`. This article explains the machinery under the hood, the "Hard Way".
 
 If you’ve ever tried to make one cluster consume resources from another, you’ve probably had to deal with complicated networking setups, VPN tunnels, duplicated Custom Resource Definitions (CRDs), or custom-built controllers to keep everything in sync.
 
@@ -160,8 +163,7 @@ To ensure authentication works correctly and enable cross-cluster connectivity, 
 sudo sh -c "echo '127.0.0.1 kube-bind-backend.kube-bind.svc provider-control-plane' >> /etc/hosts"
 ```
 
-**Windows**:
-Add `127.0.0.1 kube-bind-backend.kube-bind.svc` to `C:\Windows\System32\drivers\etc\hosts`.
+**Windows**: Add `127.0.0.1 kube-bind-backend.kube-bind.svc` to `C:\Windows\System32\drivers\etc\hosts`.
 
 Now, install the backend using Helm, configuring it to use this domain:
 
@@ -209,8 +211,7 @@ Since we are running locally in Kind without an Ingress, we need to port-forward
 kubectl port-forward svc/kube-bind-backend -n kube-bind 8080:8080 --context kind-provider
 ```
 
-![Kube Bind Authentication Required](images/auth-required.png)
-_If you visit `http://kube-bind-backend.kube-bind.svc:8080` in your browser, you'll see this screen. This is normal and confirms the backend is running!_
+![Kube Bind Authentication Required](images/auth-required.png) _If you visit `http://kube-bind-backend.kube-bind.svc:8080` in your browser, you'll see this screen. This is normal and confirms the backend is running!_
 
 ### Step 3: Exporting an API Service
 
@@ -341,8 +342,7 @@ Check the Konnector pods:
 kubectl get po -n kube-bind
 ```
 
-Output:
-We can see the konnector pods running in the `kube-bind` namespace.
+Output: We can see the konnector pods running in the `kube-bind` namespace.
 
 ```text
 NAME                         READY   STATUS    RESTARTS   AGE

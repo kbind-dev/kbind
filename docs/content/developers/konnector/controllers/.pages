@@ -1,4 +1,5 @@
 nav:
   - konnector.md
-  - apiservicebinding.md
-  - Cluster: cluster
+  - connection.md
+  - binding.md
+  - synchronization.md

@@ -1,353 +1,57 @@
 # Architecture Overview
 
-This document provides detailed architecture diagrams and explanations for how kube-bind handles resource synchronization between consumer and provider clusters, with a focus on isolation strategies and namespace mapping.
+This is development-focused documentation intended to explain resource synchronization between consumer and provider clusters. For user-facing behavior, see the [Synchronization User Guide](../usage/synchronization.md).
 
-This is development-focused documentation intended to help contributors understand the internal workings of kube-bind.
-If you are looking for user-focused documentation, please refer to the [Synchronization User Guide](../usage/synchronization.md).
+v2 separates synchronization from service discovery, authentication, and credential issuance. A core-only deployment runs one consumer-side konnector and no kbind-specific provider controller.
 
-## Cluster-Scoped Resources
+## Core control loop
 
-Cluster-scoped resources (like Sheriffs in our examples) can use different isolation strategies to control how they are placed on the provider cluster and how their associated secrets are isolated.
+| Package | Responsibility |
+| --- | --- |
+| `cmd/konnector` | Wire the consumer manager, multicluster manager, provider, and reconcilers |
+| `engine/connection` | Resolve credential Secrets, pin cluster identity, discover APIs, handle schema policies and heartbeat Leases |
+| `engine/provider` | Engage Ready Connections as multicluster-runtime provider clusters, disengage unavailable ones |
+| `engine/binding` | Reconcile ClusterBinding/Binding readiness, selected APIs, related resources, and cleanup |
+| `engine/crdpull` | Install and update consumer CRDs from provider CRDs |
+| `engine/openapi` | Synthesize consumer CRDs from provider discovery and OpenAPI v3 |
+| `engine/sync` | Start per-binding/GVR syncers, reconcile spec/status and ownership, and stop obsolete syncers |
+| `engine/remote` | Read kubeconfigs and determine provider identity |
+| `engine/mapper` | Compile-time object-key mapping interface |
 
-### Architecture Flow
+The consumer manager watches core resources. A Ready Connection supplies the credentials for an engaged provider cluster. Syncers use that cluster's client for writes, API reader for fresh reads, and cache watches for provider changes. A periodic resync is a backstop, not the primary status transport.
 
-```
-CONSUMER CLUSTER                            PROVIDER CLUSTER (Backend)
-================                            ==========================
+When a Connection loses readiness, the provider disengages and its syncers stop. Recovery creates a fresh engaged cluster and rebuilds syncers, rather than retaining clients and caches tied to a dead connection. Leader election gates the consumer controllers and provider engagement together.
 
-┌─────────────────────────────┐           ┌────────────────────────────────────────────┐
-│ Namespace: wild-west        │           │ Contract Namespace (per consumer):         │
-│  - Secret: sheriff-badge-   │──────────▶│   kube-bind-<consumer-id-hash>             │
-│    credentials (ref)        │   Sync    │                                            │
-│  - Secret: sheriff-juris-   │           │   APIServiceNamespace CR:                  │
-│    diction-config (label)   │           │     metadata.name: wild-west               │
-└─────────────────────────────┘           │     status.namespace: (varies by isolation)│
-                                          └────────────────────────────────────────────┘
-┌─────────────────────────────┐
-│ Sheriff: wyatt-earp         │──────────▶ PROVIDER CLUSTER (varies by isolation)
-│  (cluster-scoped)           │   Sync    See isolation strategies below ↓
-│  spec.intent                │
-│  spec.secretRefs: [...]     │
-└─────────────────────────────┘
-         ▲
-         │ Status updates
-         └────────────────────────────────
-```
+For Kubernetes, cluster identity uses the `kube-system` namespace UID, on kcp-like providers it uses the `LogicalCluster` UID when available. This is identity pinning, not a replacement for TLS verification or RBAC.
 
-### Isolation Strategies for Cluster-Scoped Resources
+## Service layer
 
-#### 1. IsolationPrefixed
+`cmd/backend` wires independently enabled gateway, issuer, and reaper modules. The gateway embeds the static UI from `web/`. The CLI in `cli/` is an HTTP client for that gateway.
 
-```
-┌────────────────────────────────────────────┐
-│ [cc-prefixed] IsolationPrefixed:           │
-│   Sheriff: <consumer-id>-wyatt-earp        │
-│   (cluster-scoped, prefixed name)          │
-│   Secrets in namespace:                    │
-│     kube-bind-<consumer-id>-wild-west      │
-│   (APIServiceNamespace mapping)            │
-└────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+  participant U as CLI / browser
+  participant G as Gateway
+  participant I as Issuer
+  participant P as Provider API server
+  participant C as Consumer konnector
+  U->>G: Authenticate and select Export
+  G->>P: Create or update Grant
+  I->>P: Provision ServiceAccount, RBAC, token
+  U->>G: Redeem one-time bundle ticket
+  G-->>U: Secret + Connection + ClusterBinding
+  U->>C: Apply bundle to consumer
+  C->>P: Discover, synchronize, heartbeat
 ```
 
-**How it works:**
-- Sheriff resource name is prefixed with consumer ID: `<consumer-id>-wyatt-earp`
-- Sheriff remains cluster-scoped on provider
-- Secrets are isolated via namespace mapping: `wild-west` → `kube-bind-<consumer-id>-wild-west`
-- Multiple consumers can safely coexist with different prefixed resources
+Once credentials and the bundle exist, the core does not require the gateway to remain online. Grant revocation still requires the issuer to remove provisioned credentials. The optional reaper observes provider-side heartbeat Leases and removes stale Grants under its configured policy.
 
-**Use case:** When you want cluster-scoped resources on the provider but need to support multiple consumers safely.
+## Extension points and boundaries
 
-#### 2. IsolationNone
+`backend/auth.Authenticator` provides a gateway identity and optional login routes. `backend/issuer.Issuer` provisions and revokes credentials. The in-tree issuer is Kubernetes-specific, kcp workspace issuance requires a separate implementation.
 
-```
-┌────────────────────────────────────────────┐
-│ [cc-none] IsolationNone:                   │
-│   Sheriff: wyatt-earp                      │
-│   (cluster-scoped, same name on both!)     │
-│   ⚠ Last write wins between consumers      │
-│   Secrets in namespace: wild-west          │
-│   (Same namespace name on both sides!)     │
-└────────────────────────────────────────────┘
-```
+`engine/mapper.Mapper` translates namespace/name keys for synced API instances. Its two methods must round-trip. Install a custom implementation through `sync.WithMapper(...)` in an out-of-tree build, there is no `mapper` CRD field or flag. The shipped mapper is `Identity`. Mapping does not change resource scope, and related-resource synchronization does not yet use this interface.
 
-**How it works:**
-- Sheriff resource keeps the same name on both sides: `wyatt-earp`
-- Sheriff remains cluster-scoped on provider
-- **Namespace mapping is 1:1**: `wild-west` → `wild-west` (same name!)
-- **⚠️ WARNING:** No isolation! Multiple consumers share the same namespace. This is possible but discouraged.
-- Last write wins if multiple consumers create the same resource
+The provider's RBAC is the authorization boundary. Conflict markers protect against accidental ownership collisions, they do not prevent a holder of overprivileged credentials from bypassing the konnector.
 
-**Use case:** Single consumer scenarios or when you explicitly want shared resources. **Not recommended for multi-consumer environments.**
-
-#### 3. IsolationNamespaced
-
-```
-┌────────────────────────────────────────────┐
-│ [cc-namespaced] IsolationNamespaced:       │
-│   Sheriff: wyatt-earp                      │
-│   (CRD toggled to NamespaceScoped)         │
-│   in namespace:                            │
-│     kube-bind-<consumer-id>-wild-west      │
-│   Secrets in same namespace (isolated)     │
-└────────────────────────────────────────────┘
-```
-
-**How it works:**
-- Sheriff CRD is toggled from ClusterScoped to NamespaceScoped on the provider
-- Sheriff is placed in consumer-specific namespace: `kube-bind-<consumer-id>-wild-west`
-- Secrets are in the same namespace (isolated)
-- Namespace mapping: `wild-west` → `kube-bind-<consumer-id>-wild-west`
-
-**Use case:** When you want the strongest isolation and are willing to modify the CRD scope on the provider.
-
-### Key Insights for Cluster-Scoped Resources
-
-The isolation strategy determines **BOTH** how Sheriff resources are placed **AND** how namespaces are mapped:
-
-- **IsolationNone**: Same namespace name on both sides (`wild-west` → `wild-west`)
-  - ⚠️ **NO isolation for secrets!** Multiple consumers can exist but share the same namespace (discouraged)
-
-- **IsolationPrefixed**: Sheriff name prefixed, secrets isolated via namespace mapping
-  - (`wild-west` → `kube-bind-<consumer-id>-wild-west`)
-
-- **IsolationNamespaced**: Sheriff becomes namespaced, secrets isolated in same namespace
-  - (`wild-west` → `kube-bind-<consumer-id>-wild-west`)
-
-## Namespaced Resources
-
-Namespaced resources (like Cowboys in our examples) always use the ServiceNamespaced isolation strategy, regardless of the isolation parameter.
-
-### Architecture Flow
-
-```
-CONSUMER CLUSTER                            PROVIDER CLUSTER (Backend)
-================                            ==========================
-
-┌─────────────────────────────┐           ┌────────────────────────────────────────────┐
-│ Namespace: wild-west        │           │ Contract Namespace (per consumer):         │
-│                             │──────────▶│   kube-bind-<consumer-id-hash>             │
-│  Cowboy: billy-the-kid      │   Sync    │                                            │
-│   (namespaced)              │           │   APIServiceNamespace CR:                  │
-│   spec.intent               │           │     metadata.name: wild-west               │
-│   spec.secretRefs: [...]    │           │     status.namespace: ─────────────────┐   │
-│                             │           │       kube-bind-<consumer-id>-wild-west│   │
-│  - Secret: colt-45-permit   │           └────────────────────────────────────────┼───┘
-│    (ref)                    │                                                    │
-│  - Secret: cowboy-gang-     │           ACTUAL PROVIDER NAMESPACE: ◀─────────────┘
-│    affiliation (label)      │           ┌────────────────────────────────────────────┐
-└─────────────────────────────┘           │ Namespace: kube-bind-<consumer-id>-wild-   │
-         ▲                                │            west                            │
-         │ Status updates                 │                                            │
-         └────────────────────────────────│  Cowboy: billy-the-kid (namespaced)        │
-                                          │  - Secret: colt-45-permit                  │
-                                          │  - Secret: cowboy-gang-affiliation         │
-                                          │                                            │
-                                          │ RBAC (for secret access):                  │
-                                          │  - Role: kube-binder-export-wild-west-     │
-                                          │    cowboys (in this namespace)             │
-                                          │  - RoleBinding: ... (in this namespace)    │
-                                          └────────────────────────────────────────────┘
-```
-
-### InformerScope Variations
-
-Namespaced resources support two informer scope configurations:
-
-#### 1. NamespacedScope (nn)
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ [nn] Namespaced → Namespaced (informerScope=NamespacedScope):     │
-│   - Consumer: Cowboy in namespace wild-west                       │
-│   - Provider: Cowboy in namespace kube-bind-<id>-wild-west        │
-│   - Konnector watches only its own namespace on provider side     │
-│   - Natural isolation via namespaces                              │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-**How it works:**
-- Consumer resource is namespaced: `wild-west/billy-the-kid`
-- Provider resource is namespaced: `kube-bind-<consumer-id>-wild-west/billy-the-kid`
-- Konnector watches **only its own namespace** on the provider side
-- RBAC uses namespace-scoped Roles and RoleBindings
-
-**Use case:** Most efficient for namespaced resources, minimizes RBAC and watch scope.
-
-#### 2. ClusterScope (nc)
-
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ [nc] Namespaced → Cluster (informerScope=ClusterScope):           │
-│   - Consumer: Cowboy in namespace wild-west                       │
-│   - Provider: Cowboy in namespace kube-bind-<id>-wild-west        │
-│   - Konnector watches cluster-wide on provider side               │
-│   - Still isolated via namespaces, but different RBAC model       │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-**How it works:**
-- Consumer resource is namespaced: `wild-west/billy-the-kid`
-- Provider resource is namespaced: `kube-bind-<consumer-id>-wild-west/billy-the-kid`
-- Konnector watches **cluster-wide** on the provider side
-- RBAC uses ClusterRoles and ClusterRoleBindings
-
-**Use case:** When you need cluster-wide visibility or have specific RBAC requirements.
-
-### Key Insights for Namespaced Resources
-
-Namespaced resources **ALWAYS** use the ServiceNamespaced isolation strategy:
-
-- The `isolation` parameter **only applies to cluster-scoped resources**
-- Each consumer gets its own provider namespace via APIServiceNamespace mapping
-- Namespace mapping is always: `wild-west` → `kube-bind-<consumer-id>-wild-west`
-- The `informerScope` parameter only affects whether the konnector watches at namespace or cluster level
-- Secrets are always isolated per consumer
-
-## Complete Test Lifecycle
-
-The end-to-end test validates the complete binding and synchronization flow:
-
-### Setup Phase
-
-1. **Create provider workspace (kcp)**
-   - Install kube-bind CRDs
-   - Start backend server (HTTP API for binding)
-   - Bootstrap example CRDs (Cowboys/Sheriffs)
-   - Apply templates (template-cowboys.yaml / template-sheriffs.yaml)
-
-2. **Create consumer workspaces**
-   - Start konnector on each consumer (watches APIServiceBinding)
-
-### Binding Phase
-
-3. **Login to provider**
-   - Simulate browser auth flow
-   - Save credentials to kube-bind-config.yaml
-
-4. **List templates & collections**
-   - Verify backend returns templates
-   - Verify collections exist
-
-5. **Bind API**
-   - Send BindableResourcesRequest with templateRef and clusterIdentity
-   - Backend creates on provider:
-     - Contract namespace: `kube-bind-<consumer-id-hash>`
-     - APIServiceExportRequest
-     - APIServiceNamespace: `wild-west` → `kube-bind-<id>-wild-west`
-     - RBAC resources for secret access
-   - Backend returns BindingResourceResponse with CRDs, RBAC manifests
-
-6. **Apply binding on consumer**
-   - Create APIServiceBinding (watched by konnector)
-   - Apply CRDs
-   - Wait for CRD to be established
-
-### Synchronization & Verification Phase
-
-7. **Create instance on consumer**
-   - Create resource (Cowboy or Sheriff) in namespace `wild-west`
-   - Create associated secrets
-
-8. **Verify sync to provider**
-   - Instance created on provider with ClusterNamespaceAnnotation
-   - Extract providerContractNamespace and providerObjectNamespace
-
-9. **Verify namespace pre-seeding & RBAC**
-   - APIServiceNamespace created with status.namespace populated
-   - Actual provider namespace exists
-   - RBAC resources created (ClusterRole/Role + Bindings)
-
-10. **Test bi-directional sync**
-    - Update spec on consumer → synced to provider
-    - Update status on provider → synced to consumer
-
-11. **Verify secret sync**
-    - Referenced secret (spec.secretRefs) synced to provider namespace
-    - Label-selected secret synced
-
-12. **Test deletion**
-    - Delete on consumer → deleted on provider
-
-### Multi-Consumer Isolation Verification
-
-Running with 2 consumers validates:
-- Each consumer gets isolated contract namespace
-- Each consumer gets isolated provider namespace (except with IsolationNone)
-- Secrets are properly isolated (except with IsolationNone)
-- For cluster-scoped resources with IsolationNone, last-write-wins
-- For cluster-scoped resources with IsolationPrefixed, resources are name-prefixed
-- For cluster-scoped resources with IsolationNamespaced, provider CRD is toggled to NamespaceScoped
-
-## RBAC Infrastructure
-
-### Exported resources
-
-Exported resources always use cluster-scoped RBACs:
-
-- Aggregating `kube-binder-exports` ClusterRole
-  - Bound with `kube-binder-exports` ClusterRoleBinding to `<APIServiceExport.Namespace>/kube-binder` ServiceAccount
-
-This aggregating ClusterRole includes all subsequent ClusterRoles that are created for each APIServiceExport.
-
-- `kube-binder-<APIServiceExport.Namespace>-<APIServiceExport.Name>` ClusterRole for each APIServiceExport
-  - Each resource in the APIServiceExport is granted `"get", "list", "watch", "create", "update", "patch", "delete"` set of verbs.
-  - Aggregates into `kube-binder-exports` ClusterRole.
-
-### Claimed resources
-
-Claimed resources use namespace- or cluster-scoped RBACs depending on the resource scope of the claimed resource itself, as well as backend's informer scope.
-
-For cluster-scoped informers:
-
-**Scope of the claimed resource** | **Informer scope** | **What happens**
---- | --- | ---
-cluster | cluster | Creates ClusterRole & ClusterRoleBinding
-namespace | cluster | Creates ClusterRole & ClusterRoleBinding
-
-For namespace-scoped informers:
-
-**Scope of the claimed resource** | **Informer scope** | **What happens**
---- | --- | ---
-cluster | namespace | Creates ClusterRole & ClusterRoleBinding
-namespace | namespace | Creates Role & RoleBinding
-
-Regardless of the configuration, claimed resources are granted `"get", "list", "watch", "create", "update", "patch", "delete"` set of verbs.
-
-## Implementation Details
-
-### Code Structure
-
-- **Isolation strategies**: `pkg/konnector/controllers/cluster/serviceexport/isolation/`
-  - `none.go`: No isolation, same names/namespaces on both sides
-  - `prefixed.go`: Prefix resource names with consumer ID
-  - `namespaced.go`: Convert cluster-scoped to namespaced
-  - `servicenamespaced.go`: APIServiceNamespace-based mapping for namespaced resources
-
-- **Controller logic**: `pkg/konnector/controllers/cluster/serviceexport/serviceexport_reconcile.go`
-  - Determines which isolation strategy to use based on resource scope and configuration
-  - Lines 247-284: Strategy selection logic
-
-### Strategy Selection Logic
-
-```go
-switch {
-case schema.Spec.Scope == apiextensionsv1.NamespaceScoped:
-    // ALWAYS use ServiceNamespaced for namespaced resources
-    isolationStrategy = isolation.NewServiceNamespaced(...)
-
-case export.Spec.Isolation == kubebindv1alpha2.IsolationNone:
-    isolationStrategy = isolation.NewNone(...)
-
-case export.Spec.Isolation == kubebindv1alpha2.IsolationPrefixed:
-    isolationStrategy = isolation.NewPrefixed(...)
-
-case export.Spec.Isolation == kubebindv1alpha2.IsolationNamespaced:
-    isolationStrategy = isolation.NewNamespaced(...)
-}
-```
-
-## References
-
-- Test implementation: `test/e2e/bind/happy-case_test.go`
-- API types: `sdk/apis/kubebind/v1alpha2/apiserviceexport_types.go`
-- Isolation strategies: `pkg/konnector/controllers/cluster/serviceexport/isolation/`
+The historical [slim-core proposal](https://github.com/kbind-dev/kbind/blob/v2-next/docs/proposals/v2-slim-core.md) and [extended-layer proposal](https://github.com/kbind-dev/kbind/blob/v2-next/docs/proposals/v2-extended.md) explain design decisions. They include earlier names and planned behavior, the [user guides](../usage/api-concepts.md) and implementation describe the current contract.

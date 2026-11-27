@@ -1,5 +1,5 @@
 /*
-Copyright 2025 The Kube Bind Authors.
+Copyright 2026 The kbind Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,25 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package web embeds the gateway's UI: a dependency-free static SPA that is a
+// pure gateway client — it holds no flow state the gateway doesn't have.
 package web
 
 import (
 	"embed"
 	"io/fs"
-	"net/http"
 )
 
-// Static files embedded in the binary.
-//
-//go:embed dist/*
-var StaticFiles embed.FS
+//go:embed static
+var static embed.FS
 
-// GetFileSystem returns the embedded file system for serving static files.
-func GetFileSystem() http.FileSystem {
-	// Create a sub-filesystem starting from dist
-	subFS, err := fs.Sub(StaticFiles, "dist")
+// Static returns the UI filesystem rooted at the static directory.
+func Static() fs.FS {
+	sub, err := fs.Sub(static, "static")
 	if err != nil {
-		panic("failed to create sub filesystem: " + err.Error())
+		panic(err) // embedded path is fixed at compile time
 	}
-	return http.FS(subFS)
+	return sub
 }

@@ -7,20 +7,21 @@ weight: 30
 
 # CloudNativePG Integration
 
-This document shows how the [CloudNativePG](https://cloudnative-pg.io/) Postgres database operator
-can be integrated and provided using kube-bind.
+This document shows how the [CloudNativePG](https://cloudnative-pg.io/) Postgres database operator can be integrated and provided using kube-bind.
 
 ## Setup
 
-The following sections will guide you through the one-time setup that is required for providing
-Postgres databases using CloudNativePG and kube-bind.
+The following sections will guide you through the one-time setup that is required for providing Postgres databases using CloudNativePG and kube-bind.
+
+Follow the [prerequisites](index.md#prerequisites), then select the provider:
+
+```bash
+kubectl config use-context provider
+```
 
 ### Install CloudNativePG
 
-Install CloudNativePG in your Kubernetes cluster, where kube-bind backend is running, if you
-haven't already. Follow the [official installation guide](https://cloudnative-pg.io/docs/1.28/installation_upgrade)
-in the CloudNativePG documentation. In its simplest form, the installation consists of applying this
-manifest:
+Install CloudNativePG in your Kubernetes cluster, where kube-bind backend is running, if you haven't already. Follow the [official installation guide](https://cloudnative-pg.io/docs/1.28/installation_upgrade) in the CloudNativePG documentation. In its simplest form, the installation consists of applying this manifest:
 
 ```bash
 kubectl apply \
@@ -33,111 +34,89 @@ kubectl apply \
 To export the `Cluster` CRD in the provider cluster, add the kube-bind export label to it:
 
 ```bash
-kubectl label crd clusters.postgresql.cnpg.io kube-bind.io/exported=true --overwrite
+kubectl label crd clusters.postgresql.cnpg.io core.kbind.io/exported=true --overwrite
 ```
 
-### Create a APIServiceExportTemplate
+### Create a Catalog Export
 
-It's now time to configure kube-bind to export the `clusters` resource. To do so, create a
-kube-bind `APIServiceExportTemplate` in the provider cluster like this one:
+It's now time to configure kube-bind to export the `clusters` resource. Create a catalog `Export` in the provider cluster like this one:
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
-apiVersion: kube-bind.io/v1alpha2
-kind: APIServiceExportTemplate
+apiVersion: catalog.kbind.io/v1alpha1
+kind: Export
 metadata:
-  labels:
-    provider: cloudnativepg
   name: pg-clusters
 spec:
-  permissionClaims:
-  - group: ""
-    resource: secrets
-    selector:
-      references:
-        - resource: clusters
-          group: postgresql.cnpg.io
-          jsonPath:
-            name: 'spec.bootstrap.initdb.secret.name'
-  resources:
-  - group: postgresql.cnpg.io
-    resource: clusters
-    versions:
-    - v1
-  scope: Namespaced
+  title: CloudNativePG clusters
+  description: Provision PostgreSQL clusters with CloudNativePG.
+  apis:
+    - name: clusters.postgresql.cnpg.io
+  defaults:
+    relatedResources:
+      - group: ""
+        resource: secrets
+        direction: FromConsumer
+        selector:
+          names:
+            - cluster-example-app-credentials
 EOF
 ```
 
+This walkthrough keeps the `cluster-example-app-credentials` Secret name fixed. v2 related-resource selectors are name/label based, they do not follow `spec.bootstrap.initdb.secret.name`.
+
 ## Usage
 
-Now that everything is set up, users can begin to bind to your backend and begin consuming the new
-API.
+Now that everything is set up, users can begin to bind to your backend and begin consuming the new API.
+
+```bash
+kubectl config use-context consumer
+```
 
 ### Login to kube-bind
 
 ```bash
 kubectl bind login https://kube-bind.example.com
+kubectl bind catalog
 ```
 
-### Request a Binding
-
-Request a binding to the `pg-clusters` template created above. This will allow you to create
-`Database` objects in your consumer cluster.
-
-**NB::** Make sure you've set your `KUBECONFIG` to the consumer cluster.
+### Bind the Export
 
 ```bash
-# you will get redirected to UI to authenticate and pick the template
-kubectl bind
+kubectl bind export pg-clusters \
+  --kubeconfig=./consumer.kubeconfig \
+  --install-konnector=false
+```
+
+The command applies the bundle for the `pg-clusters` Export to the consumer cluster. It assumes a matching konnector is already installed separately.
+
+```bash
+kubectl wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=120s
 ```
 
 !!! note
-    If you're using one of the [dev environments](../../developers/dev-environment/index.md), you
-    might need to add additional arguments to the `bind` command, like `--konnector-host-alias`.
-
-### Wait for the Binding to be Established
-
-Once the binding is active, you can create `Cluster` object in your consumer cluster,
-and you will get `Cluster` objects synced from the provider cluster.
-
-```bash
-kubectl bind
-🌐 Opening kube-bind UI in your browser...
-    https://kube-bind.example.com?redirect_url=....
-
-Browser opened successfully
-Waiting for binding completion from UI...
-   (Press Ctrl+C to cancel)
-
-Binding completed successfully!
-🔒 Updated secret kube-bind/kubeconfig-zxrdn for host https://kube-bind.example.com, namespace kube-bind-bp52k
-🚀 Deploying konnector v0.6.0 to namespace kube-bind.
-✅ Created APIServiceBinding pg-clusters-pk5c8 for 1 resources
-Created 1 APIServiceBinding(s):
-  - pg-clusters-pk5c8
-Resources bound successfully!
-```
+    v2 keeps namespace and name unchanged. This walkthrough uses `default` in both clusters instead of the old prefixed namespace form from the legacy docs.
 
 ### Create a Managed Database
 
 Verify that a `clusters.postgresql.cnpg.io` CRD is synced to the consumer cluster:
 
 ```bash
-k get crd clusters.postgresql.cnpg.io
+kubectl get crd clusters.postgresql.cnpg.io
 NAME                           CREATED AT
 clusters.postgresql.cnpg.io    2025-11-27T14:22:18Z
 ```
 
-Order a new consumer database instance by creating a Postgres cluster. We need to provide our own
-credentials, otherwise the automatically generated credentials on the provider cluster will be
-inaccessible to consumers.
+Order a new consumer database instance by creating a Postgres cluster in the consumer cluster. We need to provide our own credentials, otherwise the automatically generated credentials on the provider cluster will be inaccessible to consumers.
 
-```yaml
+```bash
 kubectl apply -f - <<EOF
-apiVerson: v1
+apiVersion: v1
 kind: Secret
 metadata:
   name: cluster-example-app-credentials
+  namespace: default
+type: kubernetes.io/basic-auth
 data:
   username: bXktYXBwbGljYXRpb24=
   password: c3VwZXItc2VjcjN0LXBhc3N3MHJk
@@ -147,12 +126,14 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: cluster-example
+  namespace: default
 spec:
   instances: 3
   storage:
     size: 1Gi
   bootstrap:
     initdb:
+      owner: my-application
       secret:
         name: cluster-example-app-credentials
 EOF
@@ -160,223 +141,19 @@ EOF
 
 ### Wait for Provisioning
 
-The kube-bind konnector and the CloudNativePG operator should now be busy provisioning your
-database. You can observe the provisioned database and connection Secret in the provider cluster:
+The kube-bind konnector and the CloudNativePG operator should now be busy provisioning your database. You can observe the provisioned database and connection Secret in the provider cluster, because v2 preserves namespace/name, both resources stay in `default`:
 
 ```bash
-kubectl -n kube-bind-xbrxn-default get clusters
+kubectl --context=provider -n default get clusters
 
 NAME              AGE   INSTANCES   READY   STATUS                     PRIMARY
 cluster-example   22m   3           3       Cluster in healthy state   cluster-example-1
 ```
 
 ```bash
-kubectl -n kube-bind-xbrxn-default get clusters cluster-example -o yaml
-```
-
-```yaml
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  annotations:
-    kube-bind.io/cluster-namespace: kube-bind-xbrxn
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"postgresql.cnpg.io/v1","kind":"Cluster","metadata":{"annotations":{},"name":"cluster-example","namespace":"default"},"spec":{"bootstrap":{"initdb":{"secret":{"name":"cluster-example-app-credentials"}}},"instances":3,"storage":{"size":"1Gi"}}}
-  creationTimestamp: "2026-01-22T10:13:57Z"
-  generation: 1
-  name: cluster-example
-  namespace: kube-bind-xbrxn-default
-  resourceVersion: "4329"
-  uid: a8949c70-c3b7-417f-9191-fb43cbd2d667
-spec:
-  affinity:
-    podAntiAffinityType: preferred
-  bootstrap:
-    initdb:
-      database: app
-      encoding: UTF8
-      localeCType: C
-      localeCollate: C
-      owner: app
-      secret:
-        name: cluster-example-app-credentials
-  enablePDB: true
-  enableSuperuserAccess: false
-  failoverDelay: 0
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie
-  instances: 3
-  logLevel: info
-  maxSyncReplicas: 0
-  minSyncReplicas: 0
-  monitoring:
-    customQueriesConfigMap:
-    - key: queries
-      name: cnpg-default-monitoring
-    disableDefaultQueries: false
-    enablePodMonitor: false
-  postgresGID: 26
-  postgresUID: 26
-  postgresql:
-    parameters:
-      archive_mode: "on"
-      archive_timeout: 5min
-      dynamic_shared_memory_type: posix
-      full_page_writes: "on"
-      log_destination: csvlog
-      log_directory: /controller/log
-      log_filename: postgres
-      log_rotation_age: "0"
-      log_rotation_size: "0"
-      log_truncate_on_rotation: "false"
-      logging_collector: "on"
-      max_parallel_workers: "32"
-      max_replication_slots: "32"
-      max_worker_processes: "32"
-      shared_memory_type: mmap
-      shared_preload_libraries: ""
-      ssl_max_protocol_version: TLSv1.3
-      ssl_min_protocol_version: TLSv1.3
-      wal_keep_size: 512MB
-      wal_level: logical
-      wal_log_hints: "on"
-      wal_receiver_timeout: 5s
-      wal_sender_timeout: 5s
-    syncReplicaElectionConstraint:
-      enabled: false
-  primaryUpdateMethod: restart
-  primaryUpdateStrategy: unsupervised
-  probes:
-    liveness:
-      isolationCheck:
-        connectionTimeout: 1000
-        enabled: true
-        requestTimeout: 1000
-  replicationSlots:
-    highAvailability:
-      enabled: true
-      slotPrefix: _cnpg_
-    synchronizeReplicas:
-      enabled: true
-    updateInterval: 30
-  resources: {}
-  smartShutdownTimeout: 180
-  startDelay: 3600
-  stopDelay: 1800
-  storage:
-    resizeInUseVolumes: true
-    size: 1Gi
-  switchoverDelay: 3600
-status:
-  availableArchitectures:
-  - goArch: amd64
-    hash: 527e2e3b680dfba7f7578b98530f755f36156e7be00acda3318ef36fe4f4418f
-  - goArch: arm64
-    hash: aaa74c6061f3fe30f230a664b4f6076bb886c9a89d4eba3293483525c5cff533
-  certificates:
-    clientCASecret: cluster-example-ca
-    expirations:
-      cluster-example-ca: 2026-04-22 10:08:57 +0000 UTC
-      cluster-example-replication: 2026-04-22 10:08:57 +0000 UTC
-      cluster-example-server: 2026-04-22 10:08:57 +0000 UTC
-    replicationTLSSecret: cluster-example-replication
-    serverAltDNSNames:
-    - cluster-example-rw
-    - cluster-example-rw.kube-bind-xbrxn-default
-    - cluster-example-rw.kube-bind-xbrxn-default.svc
-    - cluster-example-rw.kube-bind-xbrxn-default.svc.cluster.local
-    - cluster-example-r
-    - cluster-example-r.kube-bind-xbrxn-default
-    - cluster-example-r.kube-bind-xbrxn-default.svc
-    - cluster-example-r.kube-bind-xbrxn-default.svc.cluster.local
-    - cluster-example-ro
-    - cluster-example-ro.kube-bind-xbrxn-default
-    - cluster-example-ro.kube-bind-xbrxn-default.svc
-    - cluster-example-ro.kube-bind-xbrxn-default.svc.cluster.local
-    serverCASecret: cluster-example-ca
-    serverTLSSecret: cluster-example-server
-  cloudNativePGCommitHash: a9696201f
-  cloudNativePGOperatorHash: 527e2e3b680dfba7f7578b98530f755f36156e7be00acda3318ef36fe4f4418f
-  conditions:
-  - lastTransitionTime: "2026-01-22T10:30:08Z"
-    message: A single, unique system ID was found across reporting instances.
-    reason: Unique
-    status: "True"
-    type: ConsistentSystemID
-  - lastTransitionTime: "2026-01-22T10:31:06Z"
-    message: Cluster is Ready
-    reason: ClusterIsReady
-    status: "True"
-    type: Ready
-  - lastTransitionTime: "2026-01-22T10:30:08Z"
-    message: Continuous archiving is working
-    reason: ContinuousArchivingSuccess
-    status: "True"
-    type: ContinuousArchiving
-  configMapResourceVersion:
-    metrics:
-      cnpg-default-monitoring: "2120"
-  currentPrimary: cluster-example-1
-  currentPrimaryTimestamp: "2026-01-22T10:30:07.986099Z"
-  healthyPVC:
-  - cluster-example-1
-  - cluster-example-2
-  - cluster-example-3
-  image: ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie
-  instanceNames:
-  - cluster-example-1
-  - cluster-example-2
-  - cluster-example-3
-  instances: 3
-  instancesReportedState:
-    cluster-example-1:
-      ip: 10.244.0.21
-      isPrimary: true
-      timeLineID: 1
-    cluster-example-2:
-      ip: 10.244.0.24
-      isPrimary: false
-      timeLineID: 1
-    cluster-example-3:
-      ip: 10.244.0.27
-      isPrimary: false
-      timeLineID: 1
-  instancesStatus:
-    healthy:
-    - cluster-example-1
-    - cluster-example-2
-    - cluster-example-3
-  latestGeneratedNode: 3
-  managedRolesStatus: {}
-  pgDataImageInfo:
-    image: ghcr.io/cloudnative-pg/postgresql:18.1-system-trixie
-    majorVersion: 18
-  phase: Cluster in healthy state
-  poolerIntegrations:
-    pgBouncerIntegration: {}
-  pvcCount: 3
-  readService: cluster-example-r
-  readyInstances: 3
-  secretsResourceVersion:
-    applicationSecretVersion: "3969"
-    clientCaSecretVersion: "2089"
-    replicationSecretVersion: "2092"
-    serverCaSecretVersion: "2089"
-    serverSecretVersion: "2090"
-  switchReplicaClusterStatus: {}
-  systemID: "7598131281368047651"
-  targetPrimary: cluster-example-1
-  targetPrimaryTimestamp: "2026-01-22T10:13:58.221403Z"
-  timelineID: 1
-  topology:
-    instances:
-      cluster-example-1: {}
-      cluster-example-2: {}
-      cluster-example-3: {}
-    nodesUsed: 1
-    successfullyExtracted: true
-  writeService: cluster-example-rw
+kubectl --context=provider -n default get clusters cluster-example -o yaml
 ```
 
 ---
 
-For troubleshooting and more information, check the [kube-bind documentation](https://kube-bind.io/docs/).
+For troubleshooting and more information, see [Troubleshooting](../troubleshooting.md).
