@@ -1,0 +1,29 @@
+apiVersion: core.kbind.io/v1alpha1
+kind: Connection
+metadata:
+  name: postgres-provider
+spec:
+  kubeconfigSecretRef:
+    namespace: kbind
+    name: postgres-provider-kubeconfig
+    key: kubeconfig
+  schema:
+    source: CRD
+---
+apiVersion: core.kbind.io/v1alpha1
+kind: ClusterBinding
+metadata:
+  name: checkout-postgres
+spec:
+  connectionRef:
+    name: postgres-provider
+  apis:
+    - name: clusters.postgresql.cnpg.io
+  relatedResources:
+    - group: ""
+      resource: secrets
+      direction: FromProvider
+      selector:
+        names:
+          - checkout-db-app
+          - checkout-db-ca

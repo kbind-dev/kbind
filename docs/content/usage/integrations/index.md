@@ -1,10 +1,10 @@
 # Integrations
 
-Explore the integrations below to see how you can use kbind with provider-side operators. These retain the original operator setup and example resources, with binding instructions adapted for v2.
+Explore the integrations below to see how you can use kbind with provider-side operators. The CloudNativePG guide walks through provisioning a real PostgreSQL database, returning generated credentials, and querying it from the consumer. The other guides retain their original operator examples with binding instructions adapted for v2.
 
 ## Prerequisites
 
-Install the [backend](../../developers/backend/index.md), a matching [konnector](../../setup/helm.md), and the [v2 CLI](../../setup/kubectl-plugin.md). Examples use `provider` and `consumer` kubeconfig contexts and a separate `consumer.kubeconfig` for CLI apply, substitute your own names and gateway URL.
+For catalog-based examples, install the [backend](../../developers/backend/index.md), a matching [konnector](../../setup/helm.md), and the [v2 CLI](../../setup/kubectl-plugin.md). Examples use `provider` and `consumer` kubeconfig contexts and a separate `consumer.kubeconfig` for CLI apply, substitute your own names and gateway URL.
 
 Run provider setup against `provider` and consumer manifests against `consumer`. The guides explicitly switch context before each phase. Wait for the exported consumer CRD to be Established before creating service instances.
 

@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: checkout-db-check
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: psql
+          image: postgres:18.1
+          env:
+            - name: PGHOST
+              value: checkout-db-rw
+            - name: PGDATABASE
+              value: checkout
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: checkout-db-app
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: checkout-db-app
+                  key: password
+            - name: PGSSLMODE
+              value: verify-full
+            - name: PGSSLROOTCERT
+              value: /etc/postgres-ca/ca.crt
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/postgres-ca
+              readOnly: true
+          command: [psql]
+          args:
+            - --no-psqlrc
+            - --set=ON_ERROR_STOP=1
+            - --command=CREATE TABLE IF NOT EXISTS orders (id text PRIMARY KEY, total_cents integer NOT NULL); INSERT INTO orders VALUES ('launch-day-001', 2499) ON CONFLICT (id) DO UPDATE SET total_cents = EXCLUDED.total_cents; SELECT id, total_cents FROM orders WHERE id = 'launch-day-001';
+      volumes:
+        - name: ca
+          secret:
+            secretName: checkout-db-ca
+            items:
+              - key: ca.crt
+                path: ca.crt

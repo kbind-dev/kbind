@@ -1,0 +1,13 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: checkout-db
+  namespace: default
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: checkout
+      owner: checkout_app
+  storage:
+    size: 1Gi
